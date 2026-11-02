@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebTween Components</title>
+<meta name="description" content="Every WebTween piece, used where you'd really use it: a product launch, a product page, a restaurant and an event.">
+<style>
+  :root {
+    --paper: #f2f0ea;
+    --paper-2: #e7e4dc;
+    --ink: #171614;
+    --soft: #4f4d47;
+    --dark: #171614;
+    --dark-ink: #f2f0ea;
+    --accent: #2c6a4e;
+    --margin: clamp(20px, 5vw, 72px);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 18px/1.55 system-ui, "Segoe UI", sans-serif; }
+  h1, h2, h3 { margin: 0; letter-spacing: -0.03em; line-height: 1; font-weight: 800; }
+  p { margin: 0; }
+  a { color: inherit; text-underline-offset: 0.2em; }
+  img { display: block; max-width: 100%; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  .wrap { padding: 0 var(--margin); }
+  section { padding: 140px var(--margin); }
+  .dark { background: var(--dark); color: var(--dark-ink); }
+  .dark :focus-visible { outline-color: var(--dark-ink); }
+  .tone { background: var(--paper-2); }
+  .kicker-line { font-size: 20px; color: var(--soft); max-width: 46ch; margin-top: 20px; }
+  .dark .kicker-line { color: #bdbab1; }
+  h2 { font-size: clamp(40px, 6vw, 84px); }
+  h3 { font-size: 26px; margin-bottom: 16px; letter-spacing: -0.02em; }
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 32px; margin-top: 72px; align-items: start; }
+  .button {
+    display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border: 0;
+    background: var(--accent); color: #fff; font: 700 16px system-ui, sans-serif; text-decoration: none; cursor: pointer;
+  }
+  .button:active { transform: scale(0.97); }
+  pre { margin: 24px 0 0; padding: 16px 18px; overflow: auto; background: rgba(0, 0, 0, 0.06); font: 14px/1.6 ui-monospace, Consolas, monospace; }
+  .dark pre { background: rgba(255, 255, 255, 0.08); }
+
+  /* ===== top ===== */
+  .top { min-height: 92vh; display: flex; flex-direction: column; justify-content: center; padding-top: 80px; padding-bottom: 80px; }
+  .top h1 { font-size: clamp(52px, 9vw, 148px); max-width: 12ch; }
+  .top .kicker-line { font-size: clamp(20px, 2vw, 28px); color: var(--ink); max-width: 30ch; }
+  .rotating { color: var(--accent); }
+  .jump { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 40px; font-weight: 700; }
+
+  /* ===== launch ===== */
+  .launch-countdown { grid-column: 1 / 7; }
+  .launch-countdown .webtween-countdown { font-size: clamp(18px, 2.2vw, 30px); gap: 1.2em; margin-top: 8px; }
+  .stats { grid-column: 8 / 13; display: grid; gap: 28px; }
+  .stat-number { font-size: clamp(44px, 5vw, 72px); font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+  .stat p:last-child { color: #bdbab1; margin-top: 6px; }
+  .strip { margin-top: 120px; padding: 28px 0; border-block: 0; background: var(--accent); color: #fff; font-size: clamp(24px, 3vw, 40px); font-weight: 800; letter-spacing: -0.02em; }
+  .strip span { white-space: nowrap; }
+
+  /* ===== product ===== */
+  .spin-box { grid-column: 1 / 6; }
+  .spin-box .webtween-spin { background: #fff; }
+  .product-text { grid-column: 7 / 13; }
+  .hotspot-box { grid-column: 1 / 8; margin-top: 64px; }
+  .hotspot-photo { position: relative; }
+  .hotspot-photo img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+  .compare-box { grid-column: 8 / 13; margin-top: 64px; }
+  .compare-box .caption, .hotspot-box .caption, .spin-box .caption { margin-top: 12px; color: var(--soft); font-size: 16px; }
+
+  /* ===== restaurant ===== */
+  .menu-box { grid-column: 1 / 8; }
+  .dish { display: flex; justify-content: space-between; gap: 24px; padding: 14px 0; }
+  .dish p:first-child b { display: block; }
+  .dish p:first-child span { color: var(--soft); font-size: 16px; }
+  .dish .price { font-weight: 700; white-space: nowrap; }
+  .hours-box { grid-column: 9 / 13; background: var(--paper); padding: 28px; }
+  .hours-box .webtween-hours-now { font-size: 20px; }
+  .gallery { grid-column: 1 / 13; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; margin-top: 64px; }
+  .gallery img { width: 100%; height: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+  .gallery img:first-child { grid-row: span 2; aspect-ratio: auto; }
+
+  /* ===== event ===== */
+  .agenda { grid-column: 1 / 8; }
+  .session { display: grid; grid-template-columns: 90px 1fr; gap: 16px; padding: 14px 0; }
+  .session b { display: block; }
+  .session span { color: #bdbab1; font-size: 16px; }
+  .event-side { grid-column: 9 / 13; display: grid; gap: 32px; }
+  .event-side .webtween-countdown { font-size: 18px; }
+  .event-side .webtween-calendar-button { background: var(--dark-ink); color: var(--ink); }
+  .faq { grid-column: 1 / 13; margin-top: 64px; max-width: 820px; }
+  .faq details { padding: 18px 0; }
+  .faq details + details { margin-top: 4px; }
+  .faq summary { font-size: 22px; font-weight: 700; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: "+"; font-weight: 400; }
+  .faq details[open] summary::after { content: "–"; }
+  .faq .webtween-accordion-body p { padding-top: 10px; color: #cfccc3; max-width: 60ch; }
+
+  footer { padding: 80px var(--margin) 48px; }
+  footer .big { font-size: clamp(64px, 16vw, 240px); font-weight: 800; letter-spacing: -0.05em; line-height: 0.85; }
+  footer p { margin-top: 24px; color: var(--soft); font-size: 15px; max-width: 70ch; }
+
+  @media (max-width: 860px) {
+    .grid > * { grid-column: 1 / 13 !important; }
+    .gallery { grid-template-columns: 1fr 1fr; }
+    .gallery img:first-child { grid-column: 1 / 3; grid-row: auto; aspect-ratio: 16 / 10; }
+  }
+</style>
+</head>
+<body>
+
+<main>
+  <!-- ===== top ===== -->
+  <header class="top wrap">
+    <h1 id="title">Everything a page needs to move</h1>
+    <p class="kicker-line">Ready-made pieces for <span id="for">product launches</span>, each one line of WebTween.</p>
+    <nav class="jump" aria-label="Sections">
+      <a href="#launch">Launch</a><a href="#product">Product page</a><a href="#restaurant">Restaurant</a><a href="#event">Event</a>
+    </nav>
+  </header>
+
+  <!-- ===== a product launch ===== -->
+  <section class="dark" id="launch" aria-labelledby="launch-title">
+    <h2 id="launch-title">A product launch</h2>
+    <p class="kicker-line">Countdown, CountUp and Marquee: the launch-day trio.</p>
+    <div class="grid">
+      <div class="launch-countdown">
+        <h3>Doors open in</h3>
+        <div id="countdown"></div>
+        <pre>new Countdown("2027-03-20T10:00:00Z", { Parent: "#countdown" })</pre>
+      </div>
+      <div class="stats">
+        <div class="stat"><p class="stat-number">12,400+</p><p>people on the waiting list</p></div>
+        <div class="stat"><p class="stat-number">98.5%</p><p>would tell a friend</p></div>
+        <pre>new CountUp(".stat-number")</pre>
+      </div>
+    </div>
+    <div class="strip" id="strip" aria-label="Every WebTween piece">
+      <span>Tweens ✦</span><span>Timelines ✦</span><span>Scroll video ✦</span><span>Tabs ✦</span><span>Lightbox ✦</span><span>Countdown ✦</span><span>Spin360 ✦</span>
+    </div>
+  </section>
+
+  <!-- ===== a product page ===== -->
+  <section id="product" aria-labelledby="product-title">
+    <h2 id="product-title">A product page</h2>
+    <p class="kicker-line">Turn it round, point at the details, show the difference.</p>
+    <div class="grid">
+      <div class="spin-box">
+        <div id="spin"></div>
+        <p class="caption">This can is drawn by code: 36 views, one every 10°. Real product photos go here.</p>
+      </div>
+      <div class="product-text">
+        <h3>Spin360</h3>
+        <p>Drag it, flick it, or use the arrow keys. It turns by itself until you touch it.</p>
+        <pre>new Spin360(photos, { Parent: "#spin" })</pre>
+      </div>
+      <div class="hotspot-box">
+        <h3>Hotspots</h3>
+        <div class="hotspot-photo" id="hotspots">
+          <img src="demo-assets/lounge.jpg" alt="A hotel lounge with armchairs and a fireplace" width="1400" height="927">
+        </div>
+        <p class="caption">Click the dots.</p>
+      </div>
+      <div class="compare-box">
+        <h3>CompareSlider</h3>
+        <div id="compare"></div>
+        <p class="caption">Drag across the picture.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== a restaurant ===== -->
+  <section class="tone" id="restaurant" aria-labelledby="restaurant-title">
+    <h2 id="restaurant-title">A restaurant</h2>
+    <p class="kicker-line">The menu in tabs, hours that are always right, photos you can open.</p>
+    <div class="grid">
+      <div class="menu-box">
+        <div id="menu">
+          <div data-tab="Starters">
+            <div class="dish"><p><b>Burrata</b><span>Peaches, basil, olive oil</span></p><p class="price">€12</p></div>
+            <div class="dish"><p><b>Fried courgette flowers</b><span>Ricotta, lemon</span></p><p class="price">€10</p></div>
+            <div class="dish"><p><b>Beef carpaccio</b><span>Rocket, parmesan</span></p><p class="price">€14</p></div>
+          </div>
+          <div data-tab="Mains">
+            <div class="dish"><p><b>Tagliatelle al ragù</b><span>Slow-cooked for six hours</span></p><p class="price">€18</p></div>
+            <div class="dish"><p><b>Sea bass</b><span>Fennel, orange, capers</span></p><p class="price">€26</p></div>
+            <div class="dish"><p><b>Aubergine parmigiana</b><span>Tomato, basil, mozzarella</span></p><p class="price">€17</p></div>
+          </div>
+          <div data-tab="Desserts">
+            <div class="dish"><p><b>Tiramisu</b><span>Made every morning</span></p><p class="price">€9</p></div>
+            <div class="dish"><p><b>Lemon sorbet</b><span>With a splash of prosecco</span></p><p class="price">€7</p></div>
+          </div>
+        </div>
+        <pre>new Tabs("#menu")</pre>
+      </div>
+      <div class="hours-box">
+        <h3>Hours</h3>
+        <div id="hours"></div>
+      </div>
+      <div class="gallery" id="gallery">
+        <img src="demo-assets/staircase.jpg" alt="The marble staircase in the hall" width="1400" height="933">
+        <img src="demo-assets/lounge.jpg" alt="The lounge, with a fire" width="1400" height="927">
+        <img src="demo-assets/atrium.jpg" alt="The atrium from the top floor" width="1050" height="1400">
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== an event ===== -->
+  <section class="dark" id="event" aria-labelledby="event-title">
+    <h2 id="event-title">An event</h2>
+    <p class="kicker-line">A schedule split by day, a countdown, and one click into their calendar.</p>
+    <div class="grid">
+      <div class="agenda">
+        <div id="agenda">
+          <div data-tab="Friday 20 March">
+            <div class="session"><b>18:00</b><p><b>Doors and drinks</b><span>On the terrace</span></p></div>
+            <div class="session"><b>19:30</b><p><b>Dinner on the lawn</b><span>Four courses, long tables</span></p></div>
+            <div class="session"><b>22:00</b><p><b>Live music</b><span>Until late</span></p></div>
+          </div>
+          <div data-tab="Saturday 21 March">
+            <div class="session"><b>10:00</b><p><b>Breakfast</b><span>In the upper lounge</span></p></div>
+            <div class="session"><b>11:30</b><p><b>Walk to the old town</b><span>Ten minutes downhill</span></p></div>
+          </div>
+        </div>
+      </div>
+      <div class="event-side">
+        <div>
+          <h3>Starts in</h3>
+          <div id="event-countdown"></div>
+        </div>
+        <div id="calendar"></div>
+        <pre>new AddToCalendar("#calendar", { Title, Start, TimeZone })</pre>
+      </div>
+      <div class="faq" id="faq">
+        <h3>Questions</h3>
+        <details><summary>Is there a dress code?</summary><p>Smart casual. It's on the lawn, so flat shoes are a good idea.</p></details>
+        <details><summary>Can I come just for the music?</summary><p>Yes. Music-only tickets are at the door from 21:30.</p></details>
+        <details><summary>What if it rains?</summary><p>Everything moves into the upper lounge. Same times, same food.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p class="big" aria-hidden="true">WebTween</p>
+  <p>A demo of WebTween's ready-made pieces. Photos by Dwi Endah Kusumawati, Karl Solano and Olly on Pexels. The restaurant, event and numbers are made up.</p>
+</footer>
+
+<script src="webtween.js"></script>
+<script>
+  /* ===== top ===== */
+  new TextReveal("#title", { When: "Now" })
+  new TextRotator("#for", ["product launches", "restaurants", "events", "product pages"])
+
+  /* ===== launch ===== */
+  new Countdown("2027-03-20T10:00:00Z", { Parent: "#countdown" })
+  new CountUp(".stat-number")
+  new Marquee("#strip", { Speed: 70 })
+
+  /* ===== product: a can, drawn from 36 sides ===== */
+  function drawCan(turn) {
+    const size = 600, canvas = document.createElement("canvas")
+    canvas.width = canvas.height = size
+    const g = canvas.getContext("2d")
+    g.fillStyle = "#fff"; g.fillRect(0, 0, size, size)  // a JPEG has no see-through background
+    // the label, unrolled: green with a cream band and the name
+    const label = document.createElement("canvas")
+    label.width = 1200; label.height = 340
+    const l = label.getContext("2d")
+    l.fillStyle = "#2c6a4e"; l.fillRect(0, 0, 1200, 340)
+    l.fillStyle = "#f2f0ea"; l.fillRect(0, 120, 1200, 100)
+    l.fillStyle = "#171614"; l.font = "800 64px system-ui, sans-serif"; l.textBaseline = "middle"
+    l.fillText("SOLENNE", 40, 172); l.fillText("SOLENNE", 640, 172)
+    l.fillStyle = "#f2c230"; l.beginPath(); l.arc(470, 60, 26, 0, Math.PI * 2); l.arc(1070, 60, 26, 0, Math.PI * 2); l.fill()
+    // wrap it round a cylinder, one column at a time
+    const r = 140, cx = size / 2, top = 130, height = 340
+    for (let x = -r; x < r; x++) {
+      const angle = Math.asin(x / r)
+      const u = ((angle + turn) / (Math.PI * 2) % 1 + 1) % 1
+      g.drawImage(label, Math.floor(u * 1200), 0, 1, 340, cx + x, top, 1, height)
+      g.fillStyle = "rgba(0,0,0," + (0.55 * (1 - Math.cos(angle)) + 0.04) + ")"  // darker towards the edges
+      g.fillRect(cx + x, top, 1, height)
+    }
+    // the lid and the base
+    g.fillStyle = "#c9c6bd"; g.beginPath(); g.ellipse(cx, top, r, 26, 0, 0, Math.PI * 2); g.fill()
+    g.fillStyle = "#a9a59b"; g.beginPath(); g.ellipse(cx, top, r * 0.8, 19, 0, 0, Math.PI * 2); g.fill()
+    g.fillStyle = "#1f4a37"; g.beginPath(); g.ellipse(cx, top + height, r, 26, 0, 0, Math.PI); g.fill()
+    return canvas.toDataURL("image/jpeg", 0.85)
+  }
+  const views = Array.from({ length: 36 }, (_, i) => drawCan((i / 36) * Math.PI * 2))
+  new Spin360(views, { Parent: "#spin", AspectRatio: "1:1", Alt: "A drink can, turning", Label: "Turn the can" })
+
+  new Hotspots("#hotspots", [
+    { X: 26, Y: 18, Title: "Brass chandeliers", Text: "Made by hand in Murano, 1931." },
+    { X: 60, Y: 62, Title: "The fire", Text: "Lit from October to April." },
+    { X: 80, Y: 35, Title: "City windows", Text: "Floor to ceiling, facing south." },
+  ])
+  new CompareSlider("#compare", {
+    Before: "demo-assets/lounge-bw.jpg", After: "demo-assets/lounge.jpg",
+    BeforeLabel: "Black and white", AfterLabel: "Colour", AspectRatio: "4:3",
+  })
+
+  /* ===== restaurant ===== */
+  new Tabs("#menu", { Label: "Menu" })
+  new OpeningHours("#hours", {
+    TimeZone: "Europe/Rome",
+    Hours: {
+      Monday: "closed",
+      Tuesday: "12:00-15:00, 19:00-23:00",
+      Wednesday: "12:00-15:00, 19:00-23:00",
+      Thursday: "12:00-15:00, 19:00-23:00",
+      Friday: "12:00-15:00, 19:00-01:00",
+      Saturday: "12:00-01:00",
+      Sunday: "12:00-17:00",
+    },
+    ShowTable: true,
+  })
+  new Lightbox("#gallery img")
+
+  /* ===== event ===== */
+  new Tabs("#agenda", { Label: "Schedule" })
+  new Countdown("2027-03-20T18:00:00+01:00", { Parent: "#event-countdown", Units: ["Days", "Hours", "Minutes"] })
+  new AddToCalendar("#calendar", {
+    Title: "Solenne Spring Weekend",
+    Start: "2027-03-20T18:00",
+    End: "2027-03-21T13:00",
+    TimeZone: "Europe/Rome",
+    Location: "Hotel Solenne, 1 Hill Road",
+    Description: "Dinner on the lawn, live music, and breakfast the next morning.",
+  })
+  new Accordion("#faq", { OnlyOne: true })
+
+  /* ===== everything else rises in as you reach it ===== */
+  new Reveal("section h2, .kicker-line, .grid > *", { Stagger: 0.07 })
+</script>
+</body>
+</html>

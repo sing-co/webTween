@@ -1267,6 +1267,32 @@
   function wantsLessMotion() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
+  function findOne(thing, what) {
+    var list = findAll(thing, what);
+    if (!list.length) throw oops(`Couldn't find anything on the page matching "` + thing + '" for the ' + what + ".");
+    return list[0];
+  }
+  function whenVisible(el, fn, threshold) {
+    if (!window.IntersectionObserver) {
+      fn();
+      return function() {
+      };
+    }
+    var watcher = new IntersectionObserver(function(entries) {
+      if (!entries.some(function(e) {
+        return e.isIntersecting;
+      })) return;
+      watcher.disconnect();
+      fn();
+    }, { threshold: threshold === void 0 ? 0.2 : threshold });
+    watcher.observe(el);
+    return function() {
+      watcher.disconnect();
+    };
+  }
+  function sameWord(value, fallback) {
+    return String(value === void 0 ? fallback : value).toLowerCase();
+  }
 
   // src/public/animation/Reveal.js
   function Reveal(things, settings) {
@@ -1371,6 +1397,259 @@
     return new Parallax(things, settings);
   };
 
+  // src/public/animation/TextReveal.js
+  function TextReveal(things, settings) {
+    if (!(this instanceof TextReveal)) return new TextReveal(things, settings);
+    settings = settings || {};
+    addStyles("TextReveal", TEXT_REVEAL_CSS);
+    this.By = sameWord(settings.By, "Words") === "letters" ? "Letters" : "Words";
+    this.Time = settings.Time === void 0 ? 0.8 : settings.Time;
+    this.Stagger = settings.Stagger === void 0 ? this.By === "Letters" ? 0.025 : 0.06 : settings.Stagger;
+    this.EasingStyle = pickName(settings.EasingStyle || "Quint", EasingStyle, "easing style");
+    var when = sameWord(settings.When, "Visible");
+    this.Elements = findAll(things, "TextReveal");
+    this.Pieces = [];
+    var self = this;
+    this.Elements.forEach(function(el) {
+      var pieces = split(el, self.By);
+      el._webtweenPieces = pieces;
+      self.Pieces = self.Pieces.concat(pieces);
+    });
+    if (wantsLessMotion()) return;
+    this.Pieces.forEach(function(piece) {
+      TweenService.Create(piece, new TweenInfo(0), { Y: "110%" }).Play();
+    });
+    this._stops = [];
+    if (when === "now") this.Show();
+    else if (when !== "never") {
+      this.Elements.forEach(function(el) {
+        self._stops.push(whenVisible(el, function() {
+          self._showPieces(el._webtweenPieces);
+        }));
+      });
+    }
+  }
+  function split(el, by) {
+    if (el._webtweenPieces) return el._webtweenPieces;
+    if (!el.hasAttribute("aria-label")) el.setAttribute("aria-label", el.textContent.replace(/\s+/g, " ").trim());
+    var pieces = [];
+    (function walk(node) {
+      Array.prototype.slice.call(node.childNodes).forEach(function(child) {
+        if (child.nodeType === 1) {
+          child.setAttribute("aria-hidden", "true");
+          walk(child);
+          return;
+        }
+        if (child.nodeType !== 3 || !child.textContent.trim()) return;
+        var bits = child.textContent.split(/(\s+)/);
+        var frag = document.createDocumentFragment();
+        bits.forEach(function(bit) {
+          if (!bit) return;
+          if (/^\s+$/.test(bit)) return frag.appendChild(document.createTextNode(bit));
+          var word = document.createElement("span");
+          word.className = "webtween-word";
+          word.setAttribute("aria-hidden", "true");
+          (by === "Letters" ? Array.from(bit) : [bit]).forEach(function(text) {
+            var mask = document.createElement("span");
+            mask.className = "webtween-mask";
+            var piece = document.createElement("span");
+            piece.className = "webtween-piece";
+            piece.textContent = text;
+            mask.appendChild(piece);
+            word.appendChild(mask);
+            pieces.push(piece);
+          });
+          frag.appendChild(word);
+        });
+        node.replaceChild(frag, child);
+      });
+    })(el);
+    return pieces;
+  }
+  TextReveal.prototype._showPieces = function(pieces) {
+    var self = this;
+    pieces.forEach(function(piece, i) {
+      var info = new TweenInfo(self.Time, self.EasingStyle, "Out", 0, false, i * self.Stagger);
+      TweenService.Create(piece, info, { Y: "0%" }).Play();
+    });
+  };
+  TextReveal.prototype.Show = function() {
+    if (this._stops) this._stops.forEach(function(stop) {
+      stop();
+    });
+    this._showPieces(this.Pieces);
+  };
+  TextReveal.prototype.Destroy = function() {
+    if (this._stops) this._stops.forEach(function(stop) {
+      stop();
+    });
+  };
+  TextReveal.prototype.show = TextReveal.prototype.Show;
+  TextReveal.prototype.destroy = TextReveal.prototype.Destroy;
+  TextReveal["new"] = function(things, settings) {
+    return new TextReveal(things, settings);
+  };
+  var TEXT_REVEAL_CSS = [
+    ".webtween-word { display: inline-block; white-space: nowrap; }",
+    "/* a little room below, so letters like g and y aren't clipped */",
+    ".webtween-mask { display: inline-block; overflow: hidden; padding-bottom: 0.12em; margin-bottom: -0.12em; vertical-align: top; }",
+    ".webtween-piece { display: inline-block; }"
+  ].join("\n");
+
+  // src/public/animation/TextRotator.js
+  function TextRotator(thing, words, settings) {
+    if (!(this instanceof TextRotator)) return new TextRotator(thing, words, settings);
+    if (!Array.isArray(words) || words.length < 2) {
+      throw oops('TextRotator needs a list of at least two words, like ["designers", "developers"].');
+    }
+    settings = settings || {};
+    addStyles("TextRotator", TEXT_ROTATOR_CSS);
+    this.Words = words.map(String);
+    this.Style = sameWord(settings.Style, "Slide") === "type" ? "Type" : "Slide";
+    this.Every = settings.Every === void 0 ? 2.5 : settings.Every;
+    this.EasingStyle = pickName(settings.EasingStyle || "Quint", EasingStyle, "easing style");
+    this.Current = 0;
+    var host = this.Instance = findOne(thing, "TextRotator");
+    host.classList.add("webtween-rotator", "webtween-rotator-" + this.Style.toLowerCase());
+    host.textContent = "";
+    this._shown = document.createElement("span");
+    this._shown.className = "webtween-rotator-word";
+    this._shown.setAttribute("aria-hidden", "true");
+    this._shown.textContent = this.Words[0];
+    var spoken = document.createElement("span");
+    spoken.className = "webtween-visually-hidden";
+    spoken.textContent = this.Words.join(", ");
+    host.append(this._shown, spoken);
+    if (wantsLessMotion()) return;
+    this._timer = setInterval(this._onTimer.bind(this), this.Every * 1e3);
+  }
+  TextRotator.prototype._onTimer = function() {
+    if (!document.hidden && !this._busy) this.Next();
+  };
+  TextRotator.prototype.Next = function() {
+    this.Current = (this.Current + 1) % this.Words.length;
+    var word = this.Words[this.Current];
+    if (this.Style === "Type") this._type(word);
+    else this._slide(word);
+  };
+  TextRotator.prototype._slide = function(word) {
+    var shown = this._shown, self = this;
+    this._busy = true;
+    var out = TweenService.Create(shown, new TweenInfo(0.35, this.EasingStyle, "In"), { Y: "-100%", Transparency: 1 });
+    out.Completed.Connect(function() {
+      shown.textContent = word;
+      TweenService.Create(shown, new TweenInfo(0), { Y: "100%", Transparency: 1 }).Play();
+      var back = TweenService.Create(shown, new TweenInfo(0.5, self.EasingStyle, "Out"), { Y: "0%", Transparency: 0 });
+      back.Completed.Connect(function() {
+        self._busy = false;
+      });
+      back.Play();
+    });
+    out.Play();
+  };
+  TextRotator.prototype._type = function(word) {
+    var shown = this._shown, self = this;
+    this._busy = true;
+    var deleting = setInterval(function() {
+      if (shown.textContent.length) return shown.textContent = shown.textContent.slice(0, -1);
+      clearInterval(deleting);
+      var i = 0;
+      var typing = setInterval(function() {
+        shown.textContent = word.slice(0, ++i);
+        if (i >= word.length) {
+          clearInterval(typing);
+          self._busy = false;
+        }
+      }, 70);
+      self._typing = typing;
+    }, 40);
+    this._deleting = deleting;
+  };
+  TextRotator.prototype.Destroy = function() {
+    clearInterval(this._timer);
+    clearInterval(this._deleting);
+    clearInterval(this._typing);
+  };
+  TextRotator.prototype.next = TextRotator.prototype.Next;
+  TextRotator.prototype.destroy = TextRotator.prototype.Destroy;
+  TextRotator["new"] = function(thing, words, settings) {
+    return new TextRotator(thing, words, settings);
+  };
+  var TEXT_ROTATOR_CSS = [
+    ".webtween-rotator { display: inline-block; vertical-align: bottom; }",
+    ".webtween-rotator-slide { overflow: hidden; padding-bottom: 0.12em; margin-bottom: -0.12em; }",
+    ".webtween-rotator-word { display: inline-block; }",
+    '/* the blinking cursor for Style: "Type" */',
+    ".webtween-rotator-type .webtween-rotator-word::after {",
+    '  content: ""; display: inline-block; width: 0.06em; height: 0.9em; margin-left: 0.06em;',
+    "  vertical-align: -0.08em; background: currentColor; animation: webtween-blink 1s steps(1) infinite;",
+    "}",
+    "@keyframes webtween-blink { 50% { opacity: 0; } }",
+    "@media (prefers-reduced-motion: reduce) { .webtween-rotator-type .webtween-rotator-word::after { animation: none; } }",
+    ".webtween-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }"
+  ].join("\n");
+
+  // src/public/animation/CountUp.js
+  function CountUp(things, settings) {
+    if (!(this instanceof CountUp)) return new CountUp(things, settings);
+    settings = settings || {};
+    this.Time = settings.Time === void 0 ? 2 : settings.Time;
+    this.EasingStyle = pickName(settings.EasingStyle || "Quart", EasingStyle, "easing style");
+    this.From = settings.From === void 0 ? 0 : settings.From;
+    this.Elements = findAll(things, "CountUp");
+    if (wantsLessMotion()) return;
+    var self = this;
+    this._stops = this.Elements.map(function(el) {
+      var number = readNumber(el.textContent);
+      if (!number) return function() {
+      };
+      el.setAttribute("aria-label", el.textContent.trim());
+      el.style.fontVariantNumeric = "tabular-nums";
+      el.textContent = number.write(self.From);
+      return whenVisible(el, function() {
+        self._count(el, number);
+      }, 0.5);
+    });
+  }
+  function readNumber(text) {
+    var match = /-?\d[\d,]*(\.\d+)?/.exec(text);
+    if (!match) return null;
+    var raw = match[0];
+    var decimals = match[1] ? match[1].length - 1 : 0;
+    var commas = raw.indexOf(",") >= 0;
+    var before = text.slice(0, match.index), after = text.slice(match.index + raw.length);
+    return {
+      value: parseFloat(raw.replace(/,/g, "")),
+      write: function(n) {
+        var fixed = n.toFixed(decimals);
+        if (commas) {
+          var parts = fixed.split(".");
+          parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+          fixed = parts.join(".");
+        }
+        return before + fixed + after;
+      }
+    };
+  }
+  CountUp.prototype._count = function(el, number) {
+    var self = this, start = performance.now();
+    (function frame(now) {
+      var t = Math.min(1, (now - start) / 1e3 / self.Time);
+      var eased = TweenService.GetValue(t, self.EasingStyle, "Out");
+      el.textContent = number.write(self.From + (number.value - self.From) * eased);
+      if (t < 1) requestAnimationFrame(frame);
+    })(start);
+  };
+  CountUp.prototype.Destroy = function() {
+    if (this._stops) this._stops.forEach(function(stop) {
+      stop();
+    });
+  };
+  CountUp.prototype.destroy = CountUp.prototype.Destroy;
+  CountUp["new"] = function(things, settings) {
+    return new CountUp(things, settings);
+  };
+
   // src/public/elements/Card.js
   function Card(settings) {
     if (!(this instanceof Card)) return new Card(settings);
@@ -1443,15 +1722,15 @@
     if (settings.Parent) findElement(settings.Parent, "ImageCard").appendChild(this.Instance);
   }
   function readAspectRatio(value) {
-    var ratio = value;
+    var ratio2 = value;
     if (typeof value === "string") {
       var parts = value.split(/[:\/]/);
-      ratio = parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : parseFloat(value);
+      ratio2 = parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : parseFloat(value);
     }
-    if (typeof ratio !== "number" || !isFinite(ratio) || ratio <= 0) {
+    if (typeof ratio2 !== "number" || !isFinite(ratio2) || ratio2 <= 0) {
       throw oops('"' + value + `" isn't an aspect ratio. Try something like 1, 1.5, "16:9" or "3/4".`);
     }
-    return ratio;
+    return ratio2;
   }
   ImageCard.prototype.Destroy = function() {
     this.Instance.remove();
@@ -1473,6 +1752,436 @@
     "  position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 12px 10px;",
     "  color: white; background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));",
     "}"
+  ].join("\n");
+
+  // src/public/elements/Countdown.js
+  function Countdown(when, settings) {
+    if (!(this instanceof Countdown)) return new Countdown(when, settings);
+    settings = settings || {};
+    this.Target = when instanceof Date ? when : new Date(when);
+    if (isNaN(this.Target)) {
+      throw oops('Countdown needs a date it understands, like "2026-12-31T18:00:00+01:00". You gave: ' + when);
+    }
+    addStyles("Countdown", COUNTDOWN_CSS);
+    this.Units = settings.Units || ["Days", "Hours", "Minutes", "Seconds"];
+    this.Labels = settings.Labels || {};
+    this.FinishedText = settings.FinishedText || "";
+    this.Finished = new Signal();
+    this.Instance = document.createElement("div");
+    this.Instance.className = "webtween-countdown";
+    this.Instance.setAttribute("role", "timer");
+    var self = this;
+    this._numbers = {};
+    this.Units.forEach(function(unit) {
+      if (!SECONDS_IN[unit]) throw oops('Countdown units can be "Days", "Hours", "Minutes" or "Seconds". You gave: ' + unit);
+      var part = document.createElement("div");
+      part.className = "webtween-countdown-part";
+      var number = document.createElement("span");
+      number.className = "webtween-countdown-number";
+      var label = document.createElement("span");
+      label.className = "webtween-countdown-label";
+      label.textContent = self.Labels[unit] || unit;
+      part.append(number, label);
+      self.Instance.appendChild(part);
+      self._numbers[unit] = number;
+    });
+    if (settings.Parent) findElement(settings.Parent, "Countdown").appendChild(this.Instance);
+    this._calm = wantsLessMotion();
+    this._update();
+    this._timer = setInterval(this._update.bind(this), 250);
+  }
+  var SECONDS_IN = { Days: 86400, Hours: 3600, Minutes: 60, Seconds: 1 };
+  Countdown.prototype._update = function() {
+    var left = Math.max(0, Math.floor((this.Target - Date.now()) / 1e3));
+    this.Remaining = left;
+    var self = this;
+    this.Units.forEach(function(unit) {
+      var value = Math.floor(left / SECONDS_IN[unit]);
+      left -= value * SECONDS_IN[unit];
+      var text = value < 10 ? "0" + value : String(value);
+      var number = self._numbers[unit];
+      if (number.textContent === text) return;
+      var first = number.textContent === "";
+      number.textContent = text;
+      if (!first && !self._calm) {
+        TweenService.Create(number, new TweenInfo(0), { Y: "-40%", Transparency: 1 }).Play();
+        TweenService.Create(number, new TweenInfo(0.45, "Quint", "Out"), { Y: "0%", Transparency: 0 }).Play();
+      }
+    });
+    var minute = Math.floor(this.Remaining / 60);
+    if (minute !== this._spokenMinute) {
+      this._spokenMinute = minute;
+      this.Instance.setAttribute("aria-label", describe(this.Remaining));
+    }
+    if (this.Remaining === 0) {
+      clearInterval(this._timer);
+      if (this.FinishedText) {
+        this.Instance.textContent = this.FinishedText;
+        this.Instance.classList.add("webtween-countdown-done");
+      }
+      this.Finished._fire();
+    }
+  };
+  function describe(seconds2) {
+    var days = Math.floor(seconds2 / 86400), hours = Math.floor(seconds2 % 86400 / 3600), minutes = Math.floor(seconds2 % 3600 / 60);
+    return days + " days, " + hours + " hours and " + minutes + " minutes to go";
+  }
+  Countdown.prototype.Destroy = function() {
+    clearInterval(this._timer);
+    this.Instance.remove();
+  };
+  Countdown.prototype.destroy = Countdown.prototype.Destroy;
+  Countdown["new"] = function(when, settings) {
+    return new Countdown(when, settings);
+  };
+  var COUNTDOWN_CSS = [
+    ".webtween-countdown { display: flex; gap: 1.5em; }",
+    ".webtween-countdown-part { display: flex; flex-direction: column; align-items: flex-start; overflow: hidden; }",
+    ".webtween-countdown-number { display: inline-block; font-size: 2.5em; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }",
+    ".webtween-countdown-label { font-size: 0.85em; opacity: 0.75; }"
+  ].join("\n");
+
+  // src/hidden/zones.js
+  function clockIn(date, timeZone) {
+    var format;
+    try {
+      format = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hourCycle: "h23",
+        weekday: "short",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "numeric",
+        second: "numeric"
+      });
+    } catch (err) {
+      throw oops('"' + timeZone + `" isn't a time zone. Use one like "Europe/London" or "America/New_York".`);
+    }
+    var out = {};
+    format.formatToParts(date).forEach(function(part) {
+      out[part.type] = part.value;
+    });
+    return {
+      weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(out.weekday),
+      year: +out.year,
+      month: +out.month,
+      day: +out.day,
+      hour: +out.hour % 24,
+      minute: +out.minute,
+      second: +out.second
+    };
+  }
+  function momentFrom(text, timeZone) {
+    if (text instanceof Date) return text;
+    var hasZone = /(Z|[+-]\d\d:?\d\d)$/.test(String(text));
+    var match = /^(\d{4})-(\d\d)-(\d\d)(?:[T ](\d\d):(\d\d)(?::(\d\d))?)?$/.exec(String(text));
+    if (hasZone || !timeZone || !match) {
+      var plain = new Date(text);
+      if (isNaN(plain)) throw oops(`Couldn't read the date "` + text + '". Write it like "2026-06-12T09:00".');
+      return plain;
+    }
+    var guess = Date.UTC(+match[1], +match[2] - 1, +match[3], +(match[4] || 0), +(match[5] || 0), +(match[6] || 0));
+    for (var i = 0; i < 2; i++) {
+      var c = clockIn(new Date(guess), timeZone);
+      var shown = Date.UTC(c.year, c.month - 1, c.day, c.hour, c.minute, c.second);
+      var wanted = Date.UTC(+match[1], +match[2] - 1, +match[3], +(match[4] || 0), +(match[5] || 0), +(match[6] || 0));
+      guess += wanted - shown;
+    }
+    return new Date(guess);
+  }
+
+  // src/public/elements/OpeningHours.js
+  var DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  function OpeningHours(thing, settings) {
+    if (!(this instanceof OpeningHours)) return new OpeningHours(thing, settings);
+    settings = settings || {};
+    if (!settings.Hours) throw oops('OpeningHours needs Hours, like { Monday: "12:00-22:00", Tuesday: "closed" }.');
+    addStyles("OpeningHours", HOURS_CSS);
+    this.TimeZone = settings.TimeZone;
+    this.Clock = settings.Clock === 12 ? 12 : 24;
+    this.ShowTable = !!settings.ShowTable;
+    this.StartWeek = settings.StartWeek === "Sunday" ? 0 : 1;
+    this.Hours = readHours(settings.Hours);
+    this.Changed = new Signal();
+    var box = this.Instance = findOne(thing, "OpeningHours");
+    box.classList.add("webtween-hours");
+    box.textContent = "";
+    this._now = document.createElement("p");
+    this._now.className = "webtween-hours-now";
+    box.appendChild(this._now);
+    if (this.ShowTable) {
+      this._table = document.createElement("dl");
+      this._table.className = "webtween-hours-table";
+      box.appendChild(this._table);
+    }
+    this._update();
+    this._timer = setInterval(this._update.bind(this), 3e4);
+  }
+  function readHours(hours) {
+    var week = [[], [], [], [], [], [], []];
+    var written = ["", "", "", "", "", "", ""];
+    Object.keys(hours).forEach(function(name) {
+      var day = DAYS.findIndex(function(d) {
+        return d.slice(0, 3).toLowerCase() === name.slice(0, 3).toLowerCase();
+      });
+      if (day < 0) throw oops('"' + name + `" isn't a day. Use Monday, Tuesday... (or Mon, Tue...).`);
+      var text = String(hours[name] || "").trim();
+      written[day] = text;
+      if (!text || /^closed$/i.test(text)) return;
+      text.split(",").forEach(function(range) {
+        var m = /^\s*(\d{1,2})(?::(\d\d))?\s*[-–]\s*(\d{1,2})(?::(\d\d))?\s*$/.exec(range);
+        if (!m) throw oops(`Couldn't read the hours "` + range.trim() + '" for ' + DAYS[day] + '. Write them like "12:00-22:00".');
+        var from = +m[1] * 60 + +(m[2] || 0);
+        var to = +m[3] * 60 + +(m[4] || 0);
+        if (to <= from) to += 1440;
+        week[day].push({ from, to });
+      });
+    });
+    return { week, written };
+  }
+  OpeningHours.prototype._status = function(day, minute) {
+    var week = this.Hours.week;
+    var yesterday = (day + 6) % 7;
+    var open = null;
+    week[day].forEach(function(r) {
+      if (minute >= r.from && minute < r.to) open = { closesDay: r.to >= 1440 ? (day + 1) % 7 : day, closesAt: r.to % 1440 };
+    });
+    week[yesterday].forEach(function(r) {
+      if (r.to > 1440 && minute < r.to - 1440) open = { closesDay: day, closesAt: r.to - 1440 };
+    });
+    if (open) return open;
+    for (var ahead = 0; ahead < 8; ahead++) {
+      var d = (day + ahead) % 7;
+      var next = week[d].filter(function(r) {
+        return ahead > 0 || r.from > minute;
+      })[0];
+      if (next) return { opensDay: d, opensAt: next.from, ahead };
+    }
+    return { never: true };
+  };
+  OpeningHours.prototype._time = function(minutes) {
+    var h = Math.floor(minutes / 60) % 24, m = minutes % 60;
+    if (this.Clock === 24) return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+    var suffix = h < 12 ? " am" : " pm";
+    h = h % 12 || 12;
+    return h + (m ? ":" + (m < 10 ? "0" : "") + m : "") + suffix;
+  };
+  OpeningHours.prototype._update = function() {
+    var clock = clockIn(/* @__PURE__ */ new Date(), this.TimeZone);
+    var minute = clock.hour * 60 + clock.minute;
+    var s = this._status(clock.weekday, minute);
+    var isOpen = s.closesAt !== void 0;
+    var text;
+    if (isOpen) {
+      var minutesLeft = (s.closesAt - minute + 1440) % 1440;
+      text = (minutesLeft <= 60 ? "Closing soon" : "Open now") + " \xB7 closes at " + this._time(s.closesAt);
+    } else if (s.never) {
+      text = "Closed";
+    } else {
+      var when = s.ahead === 0 ? "" : s.ahead === 1 ? "tomorrow " : DAYS[s.opensDay] + " ";
+      text = "Closed \xB7 opens " + when + "at " + this._time(s.opensAt);
+    }
+    this._now.textContent = text;
+    this._now.setAttribute("data-open", isOpen);
+    this.IsOpen = isOpen;
+    if (this._wasOpen !== void 0 && this._wasOpen !== isOpen) this.Changed._fire(isOpen);
+    this._wasOpen = isOpen;
+    if (this._table && this._today !== clock.weekday) this._drawTable(clock.weekday);
+  };
+  OpeningHours.prototype._drawTable = function(today) {
+    this._today = today;
+    var table = this._table, self = this;
+    table.textContent = "";
+    for (var i = 0; i < 7; i++) {
+      var day = (i + this.StartWeek) % 7;
+      var row = document.createElement("div");
+      if (day === today) {
+        row.className = "webtween-hours-today";
+        row.setAttribute("aria-current", "date");
+      }
+      var name = document.createElement("dt");
+      name.textContent = DAYS[day];
+      var hours = document.createElement("dd");
+      var ranges = this.Hours.week[day];
+      if (!ranges.length) hours.textContent = "Closed";
+      ranges.forEach(function(r, n) {
+        var range = document.createElement("span");
+        range.textContent = self._time(r.from) + "\u2013" + self._time(r.to % 1440) + (n < ranges.length - 1 ? "," : "");
+        hours.appendChild(range);
+      });
+      row.append(name, hours);
+      table.appendChild(row);
+    }
+  };
+  OpeningHours.prototype.Destroy = function() {
+    clearInterval(this._timer);
+  };
+  OpeningHours.prototype.destroy = OpeningHours.prototype.Destroy;
+  OpeningHours["new"] = function(thing, settings) {
+    return new OpeningHours(thing, settings);
+  };
+  var HOURS_CSS = [
+    ".webtween-hours-now { display: flex; align-items: center; gap: 0.5em; margin: 0; font-weight: 600; }",
+    '.webtween-hours-now::before { content: ""; width: 0.6em; height: 0.6em; border-radius: 50%; background: #c0392b; flex: none; }',
+    '.webtween-hours-now[data-open="true"]::before { background: #2e9e5b; }',
+    ".webtween-hours-table { margin: 1em 0 0; }",
+    ".webtween-hours-table > div { display: flex; justify-content: space-between; gap: 2em; padding: 0.25em 0; }",
+    ".webtween-hours-table dd { margin: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 0.4em; text-align: right; }",
+    ".webtween-hours-table dd span { white-space: nowrap; }",
+    ".webtween-hours-today { font-weight: 700; }"
+  ].join("\n");
+
+  // src/public/elements/AddToCalendar.js
+  function AddToCalendar(thing, settings) {
+    if (!(this instanceof AddToCalendar)) return new AddToCalendar(thing, settings);
+    settings = settings || {};
+    if (!settings.Title || !settings.Start) throw oops("AddToCalendar needs at least a Title and a Start.");
+    addStyles("AddToCalendar", CALENDAR_CSS);
+    this.Title = settings.Title;
+    this.Start = momentFrom(settings.Start, settings.TimeZone);
+    this.End = settings.End ? momentFrom(settings.End, settings.TimeZone) : new Date(this.Start.getTime() + 36e5);
+    this.Location = settings.Location || "";
+    this.Description = settings.Description || "";
+    if (this.End <= this.Start) throw oops("AddToCalendar's End needs to be after its Start.");
+    var box = this.Instance = findOne(thing, "AddToCalendar");
+    box.classList.add("webtween-calendar");
+    box.textContent = "";
+    var button2 = this.Button = document.createElement("button");
+    button2.type = "button";
+    button2.className = "webtween-calendar-button";
+    button2.textContent = settings.Text || "Add to calendar";
+    button2.setAttribute("aria-haspopup", "true");
+    button2.setAttribute("aria-expanded", "false");
+    var menu = this._menu = document.createElement("div");
+    menu.className = "webtween-calendar-menu";
+    menu.setAttribute("role", "menu");
+    menu.hidden = true;
+    var self = this;
+    [
+      ["Google Calendar", this.GoogleLink()],
+      ["Outlook", this.OutlookLink()],
+      ["Apple / other (.ics)", null]
+    ].forEach(function(choice) {
+      var link = document.createElement("a");
+      link.setAttribute("role", "menuitem");
+      link.textContent = choice[0];
+      if (choice[1]) {
+        link.href = choice[1];
+        link.target = "_blank";
+        link.rel = "noopener";
+      } else {
+        link.href = "#";
+        link.addEventListener("click", function(e) {
+          e.preventDefault();
+          self.Download();
+        });
+      }
+      link.addEventListener("click", function() {
+        self.Close();
+      });
+      menu.appendChild(link);
+    });
+    box.append(button2, menu);
+    button2.addEventListener("click", function() {
+      if (menu.hidden) self.Open();
+      else self.Close();
+    });
+    this._onOutside = function(e) {
+      if (!box.contains(e.target)) self.Close();
+    };
+    this._onKey = function(e) {
+      if (e.key === "Escape") {
+        self.Close();
+        button2.focus();
+      }
+      var items = Array.prototype.slice.call(menu.children);
+      var i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+      }
+    };
+  }
+  function stamp(date) {
+    return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  }
+  AddToCalendar.prototype.GoogleLink = function() {
+    return "https://calendar.google.com/calendar/render?action=TEMPLATE&text=" + encodeURIComponent(this.Title) + "&dates=" + stamp(this.Start) + "/" + stamp(this.End) + "&details=" + encodeURIComponent(this.Description) + "&location=" + encodeURIComponent(this.Location);
+  };
+  AddToCalendar.prototype.OutlookLink = function() {
+    return "https://outlook.live.com/calendar/0/action/compose?rru=addevent&subject=" + encodeURIComponent(this.Title) + "&startdt=" + encodeURIComponent(this.Start.toISOString()) + "&enddt=" + encodeURIComponent(this.End.toISOString()) + "&body=" + encodeURIComponent(this.Description) + "&location=" + encodeURIComponent(this.Location);
+  };
+  AddToCalendar.prototype.Download = function() {
+    function clean(text) {
+      return String(text).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+    }
+    var file = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//WebTween//AddToCalendar//EN",
+      "BEGIN:VEVENT",
+      "UID:" + stamp(this.Start) + "-" + Math.random().toString(36).slice(2) + "@webtween",
+      "DTSTAMP:" + stamp(/* @__PURE__ */ new Date()),
+      "DTSTART:" + stamp(this.Start),
+      "DTEND:" + stamp(this.End),
+      "SUMMARY:" + clean(this.Title),
+      "DESCRIPTION:" + clean(this.Description),
+      "LOCATION:" + clean(this.Location),
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([file], { type: "text/calendar" }));
+    link.download = this.Title.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").toLowerCase() + ".ics";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function() {
+      URL.revokeObjectURL(link.href);
+    }, 1e3);
+  };
+  AddToCalendar.prototype.Open = function() {
+    var menu = this._menu;
+    menu.hidden = false;
+    this.Button.setAttribute("aria-expanded", "true");
+    if (!wantsLessMotion()) {
+      TweenService.Create(menu, new TweenInfo(0), { Y: -6, Transparency: 1 }).Play();
+      TweenService.Create(menu, new TweenInfo(0.25, "Quint", "Out"), { Y: 0, Transparency: 0 }).Play();
+    }
+    menu.firstChild.focus();
+    document.addEventListener("pointerdown", this._onOutside);
+    this.Instance.addEventListener("keydown", this._onKey);
+  };
+  AddToCalendar.prototype.Close = function() {
+    this._menu.hidden = true;
+    this.Button.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", this._onOutside);
+    this.Instance.removeEventListener("keydown", this._onKey);
+  };
+  AddToCalendar.prototype.Destroy = function() {
+    this.Close();
+    this.Instance.textContent = "";
+  };
+  AddToCalendar.prototype.open = AddToCalendar.prototype.Open;
+  AddToCalendar.prototype.close = AddToCalendar.prototype.Close;
+  AddToCalendar.prototype.download = AddToCalendar.prototype.Download;
+  AddToCalendar.prototype.destroy = AddToCalendar.prototype.Destroy;
+  AddToCalendar["new"] = function(thing, settings) {
+    return new AddToCalendar(thing, settings);
+  };
+  var CALENDAR_CSS = [
+    ".webtween-calendar { position: relative; display: inline-block; }",
+    ".webtween-calendar-button { min-height: 44px; padding: 0 1.2em; border: 0; background: #161616; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }",
+    ".webtween-calendar-menu {",
+    "  position: absolute; left: 0; top: calc(100% + 6px); z-index: 10; min-width: 220px; padding: 6px;",
+    "  display: flex; flex-direction: column; background: #fff; color: #161616;",
+    "  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); /* it floats over the page */",
+    "}",
+    ".webtween-calendar-menu[hidden] { display: none; }",
+    ".webtween-calendar-menu a { padding: 10px 12px; color: inherit; text-decoration: none; }",
+    ".webtween-calendar-menu a:hover, .webtween-calendar-menu a:focus-visible { background: #f0efea; outline: none; }"
   ].join("\n");
 
   // src/public/buildReferences/Carousel.js
@@ -1592,9 +2301,9 @@
     this.EasingStyle = pickName(pick3(settings.EasingStyle, "Sine"), EasingStyle, "easing style");
     this.Instance = document.createElement("div");
     this.Instance.className = "webtween-slideshow";
-    var ratio = settings.AspectRatio;
+    var ratio2 = settings.AspectRatio;
     this.Slides = Array.prototype.map.call(slides, function(slide) {
-      if (typeof slide === "string") return new ImageCard({ Image: slide, AspectRatio: ratio }).Instance;
+      if (typeof slide === "string") return new ImageCard({ Image: slide, AspectRatio: ratio2 }).Instance;
       return findAll(slide, "Slideshow")[0];
     });
     var box = this.Instance;
@@ -1648,6 +2357,851 @@
     "div.webtween-slideshow > :not(:first-child) { position: absolute; inset: 0; }"
   ].join("\n");
 
+  // src/public/buildReferences/Marquee.js
+  function Marquee(thing, settings) {
+    if (!(this instanceof Marquee)) return new Marquee(thing, settings);
+    settings = settings || {};
+    addStyles("Marquee", MARQUEE_CSS);
+    this.Speed = settings.Speed === void 0 ? 60 : settings.Speed;
+    this.Direction = sameWord(settings.Direction, "Left") === "right" ? "Right" : "Left";
+    this.Gap = settings.Gap === void 0 ? 48 : settings.Gap;
+    this.PauseOnHover = settings.PauseOnHover !== false;
+    var box = this.Instance = findOne(thing, "Marquee");
+    box.classList.add("webtween-marquee");
+    box.style.setProperty("--webtween-gap", this.Gap + "px");
+    this._set = document.createElement("div");
+    this._set.className = "webtween-marquee-set";
+    while (box.firstChild) this._set.appendChild(box.firstChild);
+    this._track = document.createElement("div");
+    this._track.className = "webtween-marquee-track";
+    this._track.appendChild(this._set);
+    box.appendChild(this._track);
+    this._offset = 0;
+    this._paused = false;
+    this._onScreen = true;
+    if (wantsLessMotion()) {
+      box.classList.add("webtween-marquee-still");
+      return;
+    }
+    var self = this;
+    this._fill();
+    if (window.ResizeObserver) {
+      this._resizeWatcher = new ResizeObserver(function() {
+        self._fill();
+      });
+      this._resizeWatcher.observe(box);
+    }
+    if (window.IntersectionObserver) {
+      this._screenWatcher = new IntersectionObserver(function(entries) {
+        self._onScreen = entries[0].isIntersecting;
+      });
+      this._screenWatcher.observe(box);
+    }
+    if (this.PauseOnHover) {
+      box.addEventListener("mouseenter", function() {
+        self._paused = true;
+      });
+      box.addEventListener("mouseleave", function() {
+        self._paused = false;
+      });
+    }
+    this._tick = this._tick.bind(this);
+    this._frameRequest = requestAnimationFrame(this._tick);
+  }
+  Marquee.prototype._fill = function() {
+    var track = this._track;
+    while (track.children.length > 1) track.removeChild(track.lastChild);
+    var setWidth = this._set.offsetWidth + this.Gap;
+    if (!setWidth) return;
+    var copies = Math.max(1, Math.ceil(this.Instance.offsetWidth * 2 / setWidth));
+    for (var i = 0; i < copies; i++) {
+      var copy = this._set.cloneNode(true);
+      copy.setAttribute("aria-hidden", "true");
+      Array.prototype.forEach.call(copy.querySelectorAll("a, button, input"), function(el) {
+        el.tabIndex = -1;
+      });
+      track.appendChild(copy);
+    }
+    this._setWidth = setWidth;
+  };
+  Marquee.prototype._tick = function(now) {
+    this._frameRequest = requestAnimationFrame(this._tick);
+    var seconds2 = this._last ? Math.min(0.1, (now - this._last) / 1e3) : 0;
+    this._last = now;
+    if (this._paused || !this._onScreen || document.hidden || !this._setWidth) return;
+    this._offset = (this._offset + this.Speed * seconds2) % this._setWidth;
+    var x = this.Direction === "Left" ? -this._offset : this._offset - this._setWidth;
+    this._track.style.transform = "translateX(" + round(x) + "px)";
+  };
+  Marquee.prototype.Pause = function() {
+    this._paused = true;
+  };
+  Marquee.prototype.Play = function() {
+    this._paused = false;
+  };
+  Marquee.prototype.Destroy = function() {
+    cancelAnimationFrame(this._frameRequest);
+    if (this._resizeWatcher) this._resizeWatcher.disconnect();
+    if (this._screenWatcher) this._screenWatcher.disconnect();
+    var box = this.Instance;
+    box.textContent = "";
+    while (this._set.firstChild) box.appendChild(this._set.firstChild);
+    box.classList.remove("webtween-marquee", "webtween-marquee-still");
+  };
+  Marquee.prototype.pause = Marquee.prototype.Pause;
+  Marquee.prototype.play = Marquee.prototype.Play;
+  Marquee.prototype.destroy = Marquee.prototype.Destroy;
+  Marquee["new"] = function(thing, settings) {
+    return new Marquee(thing, settings);
+  };
+  var MARQUEE_CSS = [
+    ".webtween-marquee { overflow: hidden; }",
+    ".webtween-marquee-track { display: flex; width: max-content; gap: var(--webtween-gap); }",
+    ".webtween-marquee-set { display: flex; flex: none; align-items: center; gap: var(--webtween-gap); }",
+    ".webtween-marquee-set > * { flex: none; }",
+    ".webtween-marquee-still .webtween-marquee-track, .webtween-marquee-still .webtween-marquee-set { width: auto; flex-wrap: wrap; }"
+  ].join("\n");
+
+  // src/public/buildReferences/Tabs.js
+  var made = 0;
+  function Tabs(thing, settings) {
+    if (!(this instanceof Tabs)) return new Tabs(thing, settings);
+    settings = settings || {};
+    addStyles("Tabs", TABS_CSS);
+    var box = this.Instance = findOne(thing, "Tabs");
+    this.Panels = Array.prototype.filter.call(box.children, function(child) {
+      return child.hasAttribute("data-tab");
+    });
+    if (!this.Panels.length) throw oops('Tabs needs children with a data-tab name, like <section data-tab="Starters">.');
+    this.Changed = new Signal();
+    this._calm = wantsLessMotion();
+    box.classList.add("webtween-tabs");
+    var list = this._list = document.createElement("div");
+    list.className = "webtween-tablist";
+    list.setAttribute("role", "tablist");
+    if (settings.Label) list.setAttribute("aria-label", settings.Label);
+    var id = "webtween-tabs-" + ++made;
+    var self = this;
+    this.Tabs = this.Panels.map(function(panel, i) {
+      var tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "webtween-tab";
+      tab.id = id + "-tab-" + i;
+      tab.setAttribute("role", "tab");
+      tab.textContent = panel.getAttribute("data-tab");
+      panel.id = panel.id || id + "-panel-" + i;
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", tab.id);
+      panel.tabIndex = 0;
+      tab.setAttribute("aria-controls", panel.id);
+      tab.addEventListener("click", function() {
+        self.Show(i);
+      });
+      list.appendChild(tab);
+      return tab;
+    });
+    this._line = document.createElement("span");
+    this._line.className = "webtween-tab-line";
+    list.appendChild(this._line);
+    box.insertBefore(list, box.firstChild);
+    list.addEventListener("keydown", function(e) {
+      var count = self.Tabs.length, to = null;
+      if (e.key === "ArrowRight") to = (self.Current + 1) % count;
+      else if (e.key === "ArrowLeft") to = (self.Current + count - 1) % count;
+      else if (e.key === "Home") to = 0;
+      else if (e.key === "End") to = count - 1;
+      if (to === null) return;
+      e.preventDefault();
+      self.Show(to);
+      self.Tabs[to].focus();
+    });
+    if (window.ResizeObserver) {
+      this._resizeWatcher = new ResizeObserver(function() {
+        self._moveLine(false);
+      });
+      this._resizeWatcher.observe(list);
+    }
+    this.Current = -1;
+    this.Show(settings.Start === void 0 ? 0 : settings.Start, true);
+  }
+  Tabs.prototype.Show = function(which, quietly) {
+    var i = typeof which === "number" ? which : this.Panels.findIndex(function(p) {
+      return p.getAttribute("data-tab") === which;
+    });
+    if (i < 0 || i >= this.Panels.length) throw oops(`There's no tab "` + which + '".');
+    if (i === this.Current) return;
+    var self = this;
+    this.Tabs.forEach(function(tab, n) {
+      tab.setAttribute("aria-selected", n === i ? "true" : "false");
+      tab.tabIndex = n === i ? 0 : -1;
+    });
+    this.Panels.forEach(function(panel2, n) {
+      panel2.hidden = n !== i;
+    });
+    if (!quietly && !this._calm) {
+      var panel = this.Panels[i];
+      TweenService.Create(panel, new TweenInfo(0), { Y: 12, Transparency: 1 }).Play();
+      TweenService.Create(panel, new TweenInfo(0.45, "Quint", "Out"), { Y: 0, Transparency: 0 }).Play();
+    }
+    this.Current = i;
+    this._moveLine(!quietly);
+    if (!quietly) this.Changed._fire(i, this.Panels[i].getAttribute("data-tab"));
+  };
+  Tabs.prototype._moveLine = function(animate) {
+    var tab = this.Tabs[this.Current];
+    if (!tab) return;
+    var goal = { X: tab.offsetLeft, Width: tab.offsetWidth };
+    var time = animate && !this._calm ? 0.4 : 0;
+    TweenService.Create(this._line, new TweenInfo(time, "Quint", "Out"), goal).Play();
+  };
+  Tabs.prototype.Destroy = function() {
+    if (this._resizeWatcher) this._resizeWatcher.disconnect();
+    this._list.remove();
+    this.Panels.forEach(function(panel) {
+      panel.hidden = false;
+    });
+  };
+  Tabs.prototype.show = Tabs.prototype.Show;
+  Tabs.prototype.destroy = Tabs.prototype.Destroy;
+  Tabs["new"] = function(thing, settings) {
+    return new Tabs(thing, settings);
+  };
+  var TABS_CSS = [
+    ".webtween-tablist { position: relative; display: flex; gap: 4px; overflow-x: auto; margin-bottom: 1.5em; scrollbar-width: none; }",
+    ".webtween-tab {",
+    "  flex: none; min-height: 44px; padding: 0 1em; border: 0; background: none;",
+    "  color: inherit; font: inherit; opacity: 0.6; cursor: pointer; transition: opacity 0.2s;",
+    "}",
+    '.webtween-tab:hover, .webtween-tab[aria-selected="true"] { opacity: 1; }',
+    ".webtween-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }",
+    ".webtween-tab-line { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: currentColor; pointer-events: none; }",
+    '.webtween-tabs [role="tabpanel"]:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }'
+  ].join("\n");
+
+  // src/public/buildReferences/Accordion.js
+  function Accordion(things, settings) {
+    if (!(this instanceof Accordion)) return new Accordion(things, settings);
+    settings = settings || {};
+    addStyles("Accordion", ACCORDION_CSS);
+    this.OnlyOne = !!settings.OnlyOne;
+    this.Time = settings.Time === void 0 ? 0.4 : settings.Time;
+    this.Toggled = new Signal();
+    var items = [];
+    findAll(things, "Accordion").forEach(function(el) {
+      if (el.tagName === "DETAILS") items.push(el);
+      else items = items.concat(Array.prototype.slice.call(el.querySelectorAll("details")));
+    });
+    this.Items = items;
+    var self = this;
+    this._calm = wantsLessMotion();
+    items.forEach(function(details) {
+      details.classList.add("webtween-accordion");
+      var body = document.createElement("div");
+      body.className = "webtween-accordion-body";
+      Array.prototype.slice.call(details.childNodes).forEach(function(child) {
+        if (child.nodeName !== "SUMMARY") body.appendChild(child);
+      });
+      details.appendChild(body);
+      details._webtweenBody = body;
+      var summary = details.querySelector("summary");
+      if (!summary) return;
+      summary.addEventListener("click", function(e) {
+        e.preventDefault();
+        if (details._webtweenClosing || !details.open) self.Open(details);
+        else self.Close(details);
+      });
+    });
+  }
+  Accordion.prototype.Open = function(which) {
+    var details = typeof which === "number" ? this.Items[which] : which;
+    var body = details._webtweenBody, self = this;
+    if (this.OnlyOne) {
+      this.Items.forEach(function(other) {
+        if (other !== details && other.open && !other._webtweenClosing) self.Close(other);
+      });
+    }
+    details._webtweenClosing = false;
+    var from = details.open ? body.offsetHeight : 0;
+    details.open = true;
+    this.Toggled._fire(details, true);
+    if (this._calm) return;
+    var to = body.scrollHeight;
+    TweenService.Create(body, new TweenInfo(0), { Height: from }).Play();
+    var grow = TweenService.Create(body, new TweenInfo(this.Time, "Quint", "Out"), { Height: to });
+    grow.Completed.Connect(function(state) {
+      if (state === "Completed") body.style.height = "";
+    });
+    grow.Play();
+  };
+  Accordion.prototype.Close = function(which) {
+    var details = typeof which === "number" ? this.Items[which] : which;
+    var body = details._webtweenBody;
+    this.Toggled._fire(details, false);
+    if (this._calm) {
+      details.open = false;
+      return;
+    }
+    details._webtweenClosing = true;
+    TweenService.Create(body, new TweenInfo(0), { Height: body.offsetHeight }).Play();
+    var shrink = TweenService.Create(body, new TweenInfo(this.Time * 0.8, "Quint", "Out"), { Height: 0 });
+    shrink.Completed.Connect(function(state) {
+      if (state !== "Completed") return;
+      details._webtweenClosing = false;
+      details.open = false;
+      body.style.height = "";
+    });
+    shrink.Play();
+  };
+  Accordion.prototype.Toggle = function(which) {
+    var details = typeof which === "number" ? this.Items[which] : which;
+    if (details.open && !details._webtweenClosing) this.Close(details);
+    else this.Open(details);
+  };
+  Accordion.prototype.open = Accordion.prototype.Open;
+  Accordion.prototype.close = Accordion.prototype.Close;
+  Accordion.prototype.toggle = Accordion.prototype.Toggle;
+  Accordion["new"] = function(things, settings) {
+    return new Accordion(things, settings);
+  };
+  var ACCORDION_CSS = [
+    ".webtween-accordion-body { overflow: hidden; }",
+    ".webtween-accordion > summary { cursor: pointer; }"
+  ].join("\n");
+
+  // src/public/buildReferences/Lightbox.js
+  function Lightbox(things, settings) {
+    if (!(this instanceof Lightbox)) return new Lightbox(things, settings);
+    settings = settings || {};
+    addStyles("Lightbox", LIGHTBOX_CSS);
+    this.Images = findAll(things, "Lightbox").map(function(el) {
+      return el.tagName === "IMG" ? el : el.querySelector("img");
+    }).filter(Boolean);
+    if (!this.Images.length) throw oops("Lightbox couldn't find any images in what you gave it.");
+    this.Opened = new Signal();
+    this.Closed = new Signal();
+    this.Current = -1;
+    this._calm = wantsLessMotion();
+    var self = this;
+    this.Images.forEach(function(img, i) {
+      img.classList.add("webtween-lightbox-thumb");
+      if (!img.closest("a, button")) {
+        img.tabIndex = 0;
+        img.setAttribute("role", "button");
+        img.setAttribute("aria-label", "Open photo" + (img.alt ? ": " + img.alt : ""));
+      }
+      img.addEventListener("click", function(e) {
+        e.preventDefault();
+        self.Open(i);
+      });
+      img.addEventListener("keydown", function(e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          self.Open(i);
+        }
+      });
+    });
+    var dialog = this._dialog = document.createElement("dialog");
+    dialog.className = "webtween-lightbox";
+    dialog.setAttribute("aria-label", settings.Label || "Photo");
+    dialog.innerHTML = '<figure class="webtween-lightbox-figure"><img alt=""><figcaption></figcaption></figure><button type="button" class="webtween-lightbox-close">Close</button><button type="button" class="webtween-lightbox-previous" aria-label="Previous photo">\u2039</button><button type="button" class="webtween-lightbox-next" aria-label="Next photo">\u203A</button><p class="webtween-lightbox-count" aria-live="polite"></p>';
+    document.body.appendChild(dialog);
+    this._big = dialog.querySelector("img");
+    this._caption = dialog.querySelector("figcaption");
+    this._count = dialog.querySelector(".webtween-lightbox-count");
+    dialog.querySelector(".webtween-lightbox-close").addEventListener("click", function() {
+      self.Close();
+    });
+    dialog.querySelector(".webtween-lightbox-previous").addEventListener("click", function() {
+      self.Previous();
+    });
+    dialog.querySelector(".webtween-lightbox-next").addEventListener("click", function() {
+      self.Next();
+    });
+    dialog.addEventListener("click", function(e) {
+      if (e.target === dialog || e.target.classList.contains("webtween-lightbox-figure")) self.Close();
+    });
+    dialog.addEventListener("cancel", function(e) {
+      e.preventDefault();
+      self.Close();
+    });
+    dialog.addEventListener("keydown", function(e) {
+      if (e.key === "ArrowRight") self.Next();
+      if (e.key === "ArrowLeft") self.Previous();
+    });
+    if (this.Images.length < 2) dialog.classList.add("webtween-lightbox-single");
+  }
+  Lightbox.prototype._fill = function(i) {
+    var img = this.Images[i];
+    this._big.src = img.getAttribute("data-full") || img.currentSrc || img.src;
+    this._big.alt = img.alt || "";
+    this._caption.textContent = img.getAttribute("data-caption") || img.alt || "";
+    this._count.textContent = this.Images.length > 1 ? i + 1 + " / " + this.Images.length : "";
+    this.Current = i;
+  };
+  Lightbox.prototype._overThumb = function() {
+    var small = this.Images[this.Current].getBoundingClientRect();
+    var big = this._big.getBoundingClientRect();
+    if (!big.width || !small.width) return null;
+    return {
+      X: small.left + small.width / 2 - (big.left + big.width / 2),
+      Y: small.top + small.height / 2 - (big.top + big.height / 2),
+      Scale: small.width / big.width
+    };
+  };
+  Lightbox.prototype.Open = function(i) {
+    var self = this, dialog = this._dialog;
+    this._fill(i);
+    this._savedOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    dialog.showModal();
+    this.Opened._fire(i);
+    if (this._calm) return;
+    TweenService.Create(dialog, new TweenInfo(0), { Transparency: 1 }).Play();
+    TweenService.Create(dialog, new TweenInfo(0.3, "Sine", "Out"), { Transparency: 0 }).Play();
+    function grow() {
+      var from = self._overThumb();
+      if (!from) return;
+      TweenService.Create(self._big, new TweenInfo(0), from).Play();
+      TweenService.Create(self._big, new TweenInfo(0.5, "Quint", "Out"), { X: 0, Y: 0, Scale: 1 }).Play();
+    }
+    if (this._big.complete && this._big.naturalWidth) grow();
+    else this._big.addEventListener("load", grow, { once: true });
+  };
+  Lightbox.prototype.Close = function() {
+    var self = this, dialog = this._dialog;
+    if (!dialog.open) return;
+    function finish() {
+      dialog.close();
+      document.documentElement.style.overflow = self._savedOverflow;
+      var thumb = self.Images[self.Current];
+      if (thumb.tabIndex >= 0) thumb.focus();
+      self.Closed._fire();
+    }
+    if (this._calm) return finish();
+    var back = this._overThumb();
+    if (back) TweenService.Create(this._big, new TweenInfo(0.35, "Quint", "In"), back).Play();
+    var fade = TweenService.Create(dialog, new TweenInfo(0.35, "Sine", "In"), { Transparency: 1 });
+    fade.Completed.Connect(function(state) {
+      if (state === "Completed") finish();
+    });
+    fade.Play();
+  };
+  Lightbox.prototype.Next = function() {
+    this._swap((this.Current + 1) % this.Images.length);
+  };
+  Lightbox.prototype.Previous = function() {
+    this._swap((this.Current + this.Images.length - 1) % this.Images.length);
+  };
+  Lightbox.prototype._swap = function(i) {
+    if (this.Images.length < 2) return;
+    this._fill(i);
+    if (this._calm) return;
+    TweenService.Create(this._big, new TweenInfo(0), { X: 0, Y: 0, Scale: 0.96, Transparency: 1 }).Play();
+    TweenService.Create(this._big, new TweenInfo(0.35, "Quint", "Out"), { Scale: 1, Transparency: 0 }).Play();
+  };
+  Lightbox.prototype.Destroy = function() {
+    if (this._dialog.open) this._dialog.close();
+    this._dialog.remove();
+  };
+  Lightbox.prototype.open = Lightbox.prototype.Open;
+  Lightbox.prototype.close = Lightbox.prototype.Close;
+  Lightbox.prototype.next = Lightbox.prototype.Next;
+  Lightbox.prototype.previous = Lightbox.prototype.Previous;
+  Lightbox.prototype.destroy = Lightbox.prototype.Destroy;
+  Lightbox["new"] = function(things, settings) {
+    return new Lightbox(things, settings);
+  };
+  var LIGHTBOX_CSS = [
+    ".webtween-lightbox-thumb { cursor: zoom-in; }",
+    ".webtween-lightbox {",
+    "  width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0;",
+    "  background: rgba(12, 12, 12, 0.94); color: #fff; overflow: hidden;",
+    "}",
+    ".webtween-lightbox::backdrop { background: transparent; }",
+    ".webtween-lightbox-figure { height: 100%; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 64px 72px; box-sizing: border-box; }",
+    ".webtween-lightbox-figure img { max-width: 100%; max-height: calc(100% - 40px); object-fit: contain; }",
+    ".webtween-lightbox-figure figcaption { font: 15px/1.4 system-ui, sans-serif; opacity: 0.85; text-align: center; }",
+    ".webtween-lightbox button { position: absolute; border: 0; background: rgba(255, 255, 255, 0.12); color: #fff; font: 600 15px system-ui, sans-serif; cursor: pointer; }",
+    ".webtween-lightbox button:hover { background: rgba(255, 255, 255, 0.24); }",
+    ".webtween-lightbox button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }",
+    ".webtween-lightbox-close { top: 16px; right: 16px; min-height: 44px; padding: 0 16px; }",
+    ".webtween-lightbox-previous, .webtween-lightbox-next { top: 50%; width: 48px; height: 64px; margin-top: -32px; font-size: 32px !important; }",
+    ".webtween-lightbox-previous { left: 12px; }",
+    ".webtween-lightbox-next { right: 12px; }",
+    ".webtween-lightbox-single .webtween-lightbox-previous, .webtween-lightbox-single .webtween-lightbox-next { display: none; }",
+    ".webtween-lightbox-count { position: absolute; top: 16px; left: 20px; margin: 0; font: 15px system-ui, sans-serif; opacity: 0.8; }",
+    "@media (max-width: 600px) { .webtween-lightbox-figure { padding: 64px 12px; } .webtween-lightbox-previous, .webtween-lightbox-next { top: auto; bottom: 16px; margin: 0; } }"
+  ].join("\n");
+
+  // src/public/buildReferences/CompareSlider.js
+  function CompareSlider(thing, settings) {
+    if (!(this instanceof CompareSlider)) return new CompareSlider(thing, settings);
+    settings = settings || {};
+    if (!settings.Before || !settings.After) throw oops("CompareSlider needs a Before and an After picture.");
+    addStyles("CompareSlider", COMPARE_CSS);
+    this.Changed = new Signal();
+    var box = this.Instance = findOne(thing, "CompareSlider");
+    box.classList.add("webtween-compare");
+    box.style.aspectRatio = String(ratio(settings.AspectRatio || "16:9"));
+    box.textContent = "";
+    function image(src, alt, className) {
+      var img = document.createElement("img");
+      img.src = src;
+      img.alt = alt;
+      img.className = className;
+      img.draggable = false;
+      return img;
+    }
+    var beforeLabel = settings.BeforeLabel === void 0 ? "Before" : settings.BeforeLabel;
+    var afterLabel = settings.AfterLabel === void 0 ? "After" : settings.AfterLabel;
+    this._before = image(settings.Before, beforeLabel, "webtween-compare-before");
+    var after = image(settings.After, afterLabel, "webtween-compare-after");
+    this._handle = document.createElement("div");
+    this._handle.className = "webtween-compare-handle";
+    this._handle.innerHTML = '<span class="webtween-compare-knob" aria-hidden="true">\u2039 \u203A</span>';
+    box.append(after, this._before, this._handle);
+    [[beforeLabel, "left"], [afterLabel, "right"]].forEach(function(label) {
+      if (!label[0]) return;
+      var tag = document.createElement("span");
+      tag.className = "webtween-compare-label webtween-compare-label-" + label[1];
+      tag.textContent = label[0];
+      tag.setAttribute("aria-hidden", "true");
+      box.appendChild(tag);
+    });
+    var input = this._input = document.createElement("input");
+    input.type = "range";
+    input.min = 0;
+    input.max = 100;
+    input.step = 0.1;
+    input.className = "webtween-compare-input";
+    input.setAttribute("aria-label", settings.Label || "Compare " + beforeLabel + " and " + afterLabel);
+    box.appendChild(input);
+    var self = this;
+    input.addEventListener("input", function() {
+      self._stopHint = true;
+      self.Set(Number(input.value));
+    });
+    this.Set(settings.Start === void 0 ? 50 : settings.Start);
+    if (settings.Hint !== false && !wantsLessMotion()) {
+      this._stopWaiting = whenVisible(box, function() {
+        self._hint();
+      }, 0.5);
+    }
+  }
+  function ratio(value) {
+    if (typeof value === "number") return value;
+    var parts = String(value).split(/[:\/]/);
+    return parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : parseFloat(value) || 16 / 9;
+  }
+  CompareSlider.prototype.Set = function(position) {
+    var p = Math.max(0, Math.min(100, position));
+    this.Position = p;
+    this._input.value = p;
+    this._input.setAttribute("aria-valuetext", Math.round(p) + "% " + this._before.alt);
+    this._before.style.clipPath = "inset(0 " + (100 - p) + "% 0 0)";
+    this._handle.style.left = p + "%";
+    this.Changed._fire(p);
+  };
+  CompareSlider.prototype._hint = function() {
+    var self = this, start = performance.now(), from = this.Position;
+    var steps = [from, from - 12, from + 10, from];
+    (function frame(now) {
+      if (self._stopHint) return;
+      var t = Math.min(1, (now - start) / 1600) * (steps.length - 1);
+      var leg = Math.min(steps.length - 2, Math.floor(t));
+      var eased = TweenService.GetValue(t - leg, "Sine", "InOut");
+      self.Set(steps[leg] + (steps[leg + 1] - steps[leg]) * eased);
+      if (t < steps.length - 1) requestAnimationFrame(frame);
+    })(start);
+  };
+  CompareSlider.prototype.Destroy = function() {
+    this._stopHint = true;
+    if (this._stopWaiting) this._stopWaiting();
+    this.Instance.textContent = "";
+  };
+  CompareSlider.prototype.set = CompareSlider.prototype.Set;
+  CompareSlider.prototype.destroy = CompareSlider.prototype.Destroy;
+  CompareSlider["new"] = function(thing, settings) {
+    return new CompareSlider(thing, settings);
+  };
+  var COMPARE_CSS = [
+    ".webtween-compare { position: relative; overflow: hidden; user-select: none; background: #222; }",
+    ".webtween-compare img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }",
+    ".webtween-compare-handle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; pointer-events: none; }",
+    ".webtween-compare-knob {",
+    "  position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px;",
+    "  display: grid; place-items: center; border-radius: 50%; background: #fff; color: #161616;",
+    "  font: 700 16px/1 system-ui, sans-serif; letter-spacing: 2px;",
+    "}",
+    ".webtween-compare-label {",
+    "  position: absolute; top: 12px; padding: 4px 10px; background: rgba(0, 0, 0, 0.55); color: #fff;",
+    "  font: 600 13px/1.4 system-ui, sans-serif; pointer-events: none;",
+    "}",
+    ".webtween-compare-label-left { left: 12px; }",
+    ".webtween-compare-label-right { right: 12px; }",
+    ".webtween-compare-input {",
+    "  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;",
+    "  opacity: 0; cursor: ew-resize; touch-action: pan-y; /* phones can still scroll the page up and down */",
+    "}",
+    ".webtween-compare:has(.webtween-compare-input:focus-visible) .webtween-compare-knob { outline: 3px solid #fff; outline-offset: 3px; }"
+  ].join("\n");
+
+  // src/public/buildReferences/Hotspots.js
+  var made2 = 0;
+  function Hotspots(thing, spots, settings) {
+    if (!(this instanceof Hotspots)) return new Hotspots(thing, spots, settings);
+    if (!Array.isArray(spots) || !spots.length) {
+      throw oops('Hotspots needs a list of spots, like [{ X: 30, Y: 40, Title: "Aluminium body" }].');
+    }
+    addStyles("Hotspots", HOTSPOTS_CSS);
+    this.Opened = new Signal();
+    this.Current = -1;
+    this._calm = wantsLessMotion();
+    var box = this.Instance = findOne(thing, "Hotspots");
+    box.classList.add("webtween-hotspots");
+    if (getComputedStyle(box).position === "static") box.style.position = "relative";
+    var self = this, id = "webtween-hotspots-" + ++made2;
+    this.Spots = spots.map(function(spot, i) {
+      if (typeof spot.X !== "number" || typeof spot.Y !== "number") {
+        throw oops("Hotspot number " + (i + 1) + " needs an X and a Y, in percent.");
+      }
+      var dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "webtween-spot";
+      dot.style.left = spot.X + "%";
+      dot.style.top = spot.Y + "%";
+      dot.setAttribute("aria-expanded", "false");
+      dot.setAttribute("aria-label", spot.Title || "Detail " + (i + 1));
+      dot.setAttribute("aria-controls", id + "-" + i);
+      var card = document.createElement("div");
+      card.className = "webtween-spot-card";
+      card.id = id + "-" + i;
+      card.hidden = true;
+      if (spot.Title) {
+        var title = document.createElement("strong");
+        title.textContent = spot.Title;
+        card.appendChild(title);
+      }
+      if (spot.Text) {
+        var text = document.createElement("p");
+        text.textContent = spot.Text;
+        card.appendChild(text);
+      }
+      var left = spot.X > 55, up = spot.Y > 60;
+      card.style[left ? "right" : "left"] = (left ? 100 - spot.X : spot.X) + "%";
+      card.style[up ? "bottom" : "top"] = (up ? 100 - spot.Y : spot.Y) + "%";
+      card.style.margin = up ? "0 0 26px" : "26px 0 0";
+      card.style.transformOrigin = (up ? "bottom " : "top ") + (left ? "right" : "left");
+      dot.addEventListener("click", function() {
+        if (self.Current === i) self.Close();
+        else self.Open(i);
+      });
+      box.append(dot, card);
+      return { dot, card };
+    });
+    this._onOutside = function(e) {
+      if (!box.contains(e.target)) self.Close();
+    };
+    this._onKey = function(e) {
+      if (e.key === "Escape" && self.Current >= 0) {
+        var dot = self.Spots[self.Current].dot;
+        self.Close();
+        dot.focus();
+      }
+    };
+    document.addEventListener("pointerdown", this._onOutside);
+    document.addEventListener("keydown", this._onKey);
+  }
+  Hotspots.prototype.Open = function(i) {
+    this.Close();
+    var spot = this.Spots[i];
+    spot.card.hidden = false;
+    spot.dot.setAttribute("aria-expanded", "true");
+    spot.dot.classList.add("webtween-spot-open");
+    this.Current = i;
+    this.Opened._fire(i);
+    if (this._calm) return;
+    TweenService.Create(spot.card, new TweenInfo(0), { Scale: 0.92, Transparency: 1 }).Play();
+    TweenService.Create(spot.card, new TweenInfo(0.3, "Back", "Out"), { Scale: 1, Transparency: 0 }).Play();
+  };
+  Hotspots.prototype.Close = function() {
+    if (this.Current < 0) return;
+    var spot = this.Spots[this.Current];
+    spot.card.hidden = true;
+    spot.dot.setAttribute("aria-expanded", "false");
+    spot.dot.classList.remove("webtween-spot-open");
+    this.Current = -1;
+    this.Opened._fire(-1);
+  };
+  Hotspots.prototype.Destroy = function() {
+    document.removeEventListener("pointerdown", this._onOutside);
+    document.removeEventListener("keydown", this._onKey);
+    this.Spots.forEach(function(spot) {
+      spot.dot.remove();
+      spot.card.remove();
+    });
+  };
+  Hotspots.prototype.open = Hotspots.prototype.Open;
+  Hotspots.prototype.close = Hotspots.prototype.Close;
+  Hotspots.prototype.destroy = Hotspots.prototype.Destroy;
+  Hotspots["new"] = function(thing, spots, settings) {
+    return new Hotspots(thing, spots, settings);
+  };
+  var HOTSPOTS_CSS = [
+    ".webtween-spot {",
+    "  position: absolute; z-index: 2; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0;",
+    "  border: 3px solid #fff; border-radius: 50%; background: rgba(22, 22, 22, 0.55); cursor: pointer;",
+    "}",
+    ".webtween-spot::after {",
+    '  content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid #fff;',
+    "  animation: webtween-pulse 2s ease-out infinite; pointer-events: none;",
+    "}",
+    ".webtween-spot-open { background: #fff; }",
+    ".webtween-spot:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }",
+    "@keyframes webtween-pulse { from { transform: scale(1); opacity: 0.9; } to { transform: scale(2.2); opacity: 0; } }",
+    "@media (prefers-reduced-motion: reduce) { .webtween-spot::after { animation: none; } }",
+    ".webtween-spot-card {",
+    "  position: absolute; z-index: 3; width: max-content; max-width: min(260px, 70%); padding: 12px 14px;",
+    "  background: #fff; color: #161616; font: 14px/1.45 system-ui, sans-serif;",
+    "  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); /* it floats over the picture */",
+    "}",
+    ".webtween-spot-card[hidden] { display: none; }",
+    ".webtween-spot-card strong { display: block; margin-bottom: 2px; }",
+    ".webtween-spot-card p { margin: 0; }"
+  ].join("\n");
+
+  // src/public/buildReferences/Spin360.js
+  function Spin360(frames, settings) {
+    if (!(this instanceof Spin360)) return new Spin360(frames, settings);
+    if (!Array.isArray(frames) || frames.length < 2) {
+      throw oops('Spin360 needs a list of pictures taken all the way round, like ["1.jpg", "2.jpg", ...].');
+    }
+    settings = settings || {};
+    addStyles("Spin360", SPIN_CSS);
+    this.Frames = frames;
+    this.Sensitivity = settings.Sensitivity === void 0 ? 8 : settings.Sensitivity;
+    this.AutoSpin = settings.AutoSpin !== false && !wantsLessMotion();
+    this.Changed = new Signal();
+    this.Current = 0;
+    var box = this.Instance = document.createElement("div");
+    box.className = "webtween-spin";
+    box.style.aspectRatio = String(settings.AspectRatio ? ratioOf(settings.AspectRatio) : 1);
+    box.tabIndex = 0;
+    box.setAttribute("role", "slider");
+    box.setAttribute("aria-label", settings.Label || "Turn the product");
+    box.setAttribute("aria-valuemin", "0");
+    box.setAttribute("aria-valuemax", String(frames.length - 1));
+    this._img = document.createElement("img");
+    this._img.alt = settings.Alt || "";
+    this._img.draggable = false;
+    this._hint = document.createElement("span");
+    this._hint.className = "webtween-spin-hint";
+    this._hint.setAttribute("aria-hidden", "true");
+    this._hint.textContent = settings.HintText || "Drag to turn";
+    box.append(this._img, this._hint);
+    if (settings.Parent) findElement(settings.Parent, "Spin360").appendChild(box);
+    this._loaded = frames.map(function(src) {
+      var img = new Image();
+      img.src = src;
+      return img;
+    });
+    this.Show(0);
+    var self = this;
+    this._drag = null;
+    box.addEventListener("pointerdown", function(e) {
+      self._touched();
+      try {
+        box.setPointerCapture(e.pointerId);
+      } catch (err) {
+      }
+      self._drag = { x: e.clientX, frame: self.Current, lastX: e.clientX, lastTime: e.timeStamp, speed: 0 };
+      box.classList.add("webtween-spin-dragging");
+    });
+    box.addEventListener("pointermove", function(e) {
+      var d = self._drag;
+      if (!d) return;
+      var seconds2 = Math.max(1e-3, (e.timeStamp - d.lastTime) / 1e3);
+      d.speed = -(e.clientX - d.lastX) / self.Sensitivity / seconds2;
+      d.lastX = e.clientX;
+      d.lastTime = e.timeStamp;
+      self.Show(d.frame - Math.round((e.clientX - d.x) / self.Sensitivity));
+    });
+    function letGo() {
+      if (!self._drag) return;
+      var speed = self._drag.speed;
+      self._drag = null;
+      box.classList.remove("webtween-spin-dragging");
+      if (!wantsLessMotion() && Math.abs(speed) > 4) self._glide(speed);
+    }
+    box.addEventListener("pointerup", letGo);
+    box.addEventListener("pointercancel", letGo);
+    box.addEventListener("keydown", function(e) {
+      var step = { ArrowRight: 1, ArrowLeft: -1, ArrowUp: 1, ArrowDown: -1 }[e.key];
+      if (e.key === "Home") step = -self.Current;
+      if (step === void 0) return;
+      e.preventDefault();
+      self._touched();
+      self.Show(self.Current + step);
+    });
+    if (this.AutoSpin) {
+      this._autoTimer = setInterval(function() {
+        if (!document.hidden) self.Show(self.Current + 1);
+      }, 90);
+    }
+  }
+  function ratioOf(value) {
+    if (typeof value === "number") return value;
+    var parts = String(value).split(/[:\/]/);
+    return parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : parseFloat(value) || 1;
+  }
+  Spin360.prototype._touched = function() {
+    clearInterval(this._autoTimer);
+    cancelAnimationFrame(this._glideRequest);
+    this._hint.classList.add("webtween-spin-hint-gone");
+  };
+  Spin360.prototype._glide = function(speed) {
+    var self = this, position = this.Current, last = performance.now();
+    (function frame(now) {
+      var seconds2 = (now - last) / 1e3;
+      last = now;
+      speed *= Math.pow(0.04, seconds2);
+      position += speed * seconds2;
+      self.Show(Math.round(position));
+      if (Math.abs(speed) > 1) self._glideRequest = requestAnimationFrame(frame);
+    })(last);
+  };
+  Spin360.prototype.Show = function(n) {
+    var count = this.Frames.length;
+    var i = (Math.round(n) % count + count) % count;
+    if (i === this.Current && this._img.getAttribute("src")) return;
+    this.Current = i;
+    this._img.src = this.Frames[i];
+    this.Instance.setAttribute("aria-valuenow", String(i));
+    this.Instance.setAttribute("aria-valuetext", Math.round(i / count * 360) + " degrees");
+    this.Changed._fire(i);
+  };
+  Spin360.prototype.Destroy = function() {
+    this._touched();
+    this.Instance.remove();
+  };
+  Spin360.prototype.show = Spin360.prototype.Show;
+  Spin360.prototype.destroy = Spin360.prototype.Destroy;
+  Spin360["new"] = function(frames, settings) {
+    return new Spin360(frames, settings);
+  };
+  var SPIN_CSS = [
+    ".webtween-spin { position: relative; cursor: grab; touch-action: pan-y; user-select: none; }",
+    ".webtween-spin-dragging { cursor: grabbing; }",
+    ".webtween-spin img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }",
+    ".webtween-spin:focus-visible { outline: 3px solid currentColor; outline-offset: 4px; }",
+    ".webtween-spin-hint {",
+    "  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);",
+    "  padding: 6px 12px; background: rgba(0, 0, 0, 0.6); color: #fff;",
+    "  font: 600 13px/1.4 system-ui, sans-serif; pointer-events: none; transition: opacity 0.4s;",
+    "}",
+    ".webtween-spin-hint-gone { opacity: 0; }"
+  ].join("\n");
+
   // src/index.js
   var WebTween = {
     // animation
@@ -1660,28 +3214,28 @@
     ScrollableFrame,
     Reveal,
     Parallax,
+    TextReveal,
+    TextRotator,
+    CountUp,
     // elements
     Card,
     ImageCard,
+    Countdown,
+    OpeningHours,
+    AddToCalendar,
     // build references
     Carousel,
-    Slideshow
+    Slideshow,
+    Marquee,
+    Tabs,
+    Accordion,
+    Lightbox,
+    CompareSlider,
+    Hotspots,
+    Spin360
   };
   window.WebTween = WebTween;
-  [
-    "TweenService",
-    "TweenInfo",
-    "Enum",
-    "Color3",
-    "Timeline",
-    "ScrollableFrame",
-    "Reveal",
-    "Parallax",
-    "Card",
-    "ImageCard",
-    "Carousel",
-    "Slideshow"
-  ].forEach(function(name) {
-    if (window[name] === void 0) window[name] = WebTween[name];
+  Object.keys(WebTween).forEach(function(name) {
+    if (name !== "Tween" && window[name] === void 0) window[name] = WebTween[name];
   });
 })();

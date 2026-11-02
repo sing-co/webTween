@@ -27,4 +27,33 @@ function wantsLessMotion() {
   return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 }
 
-export { findAll, wantsLessMotion };
+// Exactly one element, or a helpful error.
+function findOne(thing, what) {
+  var list = findAll(thing, what);
+  if (!list.length) throw oops("Couldn't find anything on the page matching \"" + thing + "\" for the " + what + ".");
+  return list[0];
+}
+
+// Runs fn once, the first time el is (partly) on screen. Returns a function that stops waiting.
+function whenVisible(el, fn, threshold) {
+  if (!window.IntersectionObserver) {
+    fn();
+    return function () {};
+  }
+  var watcher = new IntersectionObserver(function (entries) {
+    if (!entries.some(function (e) { return e.isIntersecting; })) return;
+    watcher.disconnect();
+    fn();
+  }, { threshold: threshold === undefined ? 0.2 : threshold });
+  watcher.observe(el);
+  return function () {
+    watcher.disconnect();
+  };
+}
+
+// The same value whether people write it "Left", "left" or "LEFT".
+function sameWord(value, fallback) {
+  return String(value === undefined ? fallback : value).toLowerCase();
+}
+
+export { findAll, findOne, wantsLessMotion, whenVisible, sameWord };
