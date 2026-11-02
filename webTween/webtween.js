@@ -1,0 +1,984 @@
+/*
+  WebTween — smooth animations for websites, in the style of Roblox's TweenService.
+
+  Add it to your page:
+      <script src="webtween.js"></script>
+
+  DON'T EDIT THIS FILE. It's made from the files in src/.
+  Change those instead, then run:  npm run build
+*/
+(() => {
+  // src/hidden/helpers.js
+  function oops(message) {
+    return new Error("WebTween: " + message);
+  }
+  function pickName(value, list, what) {
+    if (typeof value === "string") {
+      for (var key in list) {
+        if (key.toLowerCase() === value.toLowerCase()) return key;
+      }
+    }
+    throw oops(
+      '"' + value + `" isn't a known ` + what + ". Try one of: " + Object.keys(list).join(", ") + "."
+    );
+  }
+
+  // src/hidden/easing.js
+  function bounceOut(t) {
+    var n = 7.5625, d = 2.75;
+    if (t < 1 / d) return n * t * t;
+    if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+    if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+    return n * (t -= 2.625 / d) * t + 0.984375;
+  }
+  var easeIn = {
+    Linear: function(t) {
+      return t;
+    },
+    Sine: function(t) {
+      return 1 - Math.cos(t * Math.PI / 2);
+    },
+    Quad: function(t) {
+      return t * t;
+    },
+    Cubic: function(t) {
+      return t * t * t;
+    },
+    Quart: function(t) {
+      return t * t * t * t;
+    },
+    Quint: function(t) {
+      return t * t * t * t * t;
+    },
+    Exponential: function(t) {
+      return t === 0 ? 0 : Math.pow(2, 10 * t - 10);
+    },
+    Circular: function(t) {
+      return 1 - Math.sqrt(1 - t * t);
+    },
+    Back: function(t) {
+      return 2.70158 * t * t * t - 1.70158 * t * t;
+    },
+    Elastic: function(t) {
+      if (t === 0 || t === 1) return t;
+      return -Math.pow(2, 10 * t - 10) * Math.sin((t * 10 - 10.75) * (2 * Math.PI / 3));
+    },
+    Bounce: function(t) {
+      return 1 - bounceOut(1 - t);
+    }
+  };
+  function ease(alpha, style, direction) {
+    var f = easeIn[style];
+    var t = Math.min(1, Math.max(0, alpha));
+    if (direction === "In") return f(t);
+    if (direction === "Out") return 1 - f(1 - t);
+    return t < 0.5 ? f(2 * t) / 2 : 1 - f(2 - 2 * t) / 2;
+  }
+
+  // src/public/animation/Enum.js
+  var EasingStyle = {
+    Linear: "Linear",
+    Sine: "Sine",
+    Quad: "Quad",
+    Cubic: "Cubic",
+    Quart: "Quart",
+    Quint: "Quint",
+    Exponential: "Exponential",
+    Circular: "Circular",
+    Back: "Back",
+    Elastic: "Elastic",
+    Bounce: "Bounce"
+  };
+  var EasingDirection = { In: "In", Out: "Out", InOut: "InOut" };
+  var PlaybackState = {
+    Begin: "Begin",
+    Delayed: "Delayed",
+    Playing: "Playing",
+    Paused: "Paused",
+    Completed: "Completed",
+    Cancelled: "Cancelled"
+  };
+  var Enum = Object.freeze({
+    EasingStyle: Object.freeze(EasingStyle),
+    EasingDirection: Object.freeze(EasingDirection),
+    PlaybackState: Object.freeze(PlaybackState)
+  });
+
+  // src/public/animation/TweenInfo.js
+  function TweenInfo(time, easingStyle, easingDirection, repeatCount, reverses, delayTime) {
+    if (!(this instanceof TweenInfo)) {
+      return new TweenInfo(
+        time,
+        easingStyle,
+        easingDirection,
+        repeatCount,
+        reverses,
+        delayTime
+      );
+    }
+    if (time !== null && typeof time === "object") {
+      var o = time;
+      var get = function(name) {
+        return o[name] !== void 0 ? o[name] : o[name.charAt(0).toLowerCase() + name.slice(1)];
+      };
+      time = get("Time");
+      easingStyle = get("EasingStyle");
+      easingDirection = get("EasingDirection");
+      repeatCount = get("RepeatCount");
+      reverses = get("Reverses");
+      delayTime = get("DelayTime");
+    }
+    time = time === void 0 ? 1 : time;
+    delayTime = delayTime === void 0 ? 0 : delayTime;
+    repeatCount = repeatCount === void 0 ? 0 : repeatCount;
+    if (typeof time !== "number" || !(time >= 0))
+      throw oops(
+        "Time must be a number of seconds, 0 or more. You gave: " + time
+      );
+    if (typeof delayTime !== "number" || !(delayTime >= 0))
+      throw oops(
+        "DelayTime must be a number of seconds, 0 or more. You gave: " + delayTime
+      );
+    if (typeof repeatCount !== "number" || isNaN(repeatCount))
+      throw oops(
+        "RepeatCount must be a number (use -1 to repeat forever). You gave: " + repeatCount
+      );
+    this.Time = time;
+    this.EasingStyle = pickName(
+      easingStyle === void 0 ? "Quad" : easingStyle,
+      EasingStyle,
+      "easing style"
+    );
+    this.EasingDirection = pickName(
+      easingDirection === void 0 ? "Out" : easingDirection,
+      EasingDirection,
+      "easing direction"
+    );
+    this.RepeatCount = repeatCount < 0 ? -1 : Math.floor(repeatCount);
+    this.Reverses = !!reverses;
+    this.DelayTime = delayTime;
+    Object.freeze(this);
+  }
+  TweenInfo["new"] = function(a, b, c, d, e, f) {
+    return new TweenInfo(a, b, c, d, e, f);
+  };
+
+  // src/hidden/signal.js
+  function Signal() {
+    this._listeners = [];
+  }
+  Signal.prototype.Connect = function(fn) {
+    if (typeof fn !== "function")
+      throw oops("Connect needs a function to run when the event happens.");
+    var listeners = this._listeners;
+    var entry = { fn };
+    listeners.push(entry);
+    var connection = {
+      Connected: true,
+      Disconnect: function() {
+        if (!connection.Connected) return;
+        connection.Connected = false;
+        var i = listeners.indexOf(entry);
+        if (i >= 0) listeners.splice(i, 1);
+      }
+    };
+    connection.disconnect = connection.Disconnect;
+    return connection;
+  };
+  Signal.prototype.Once = function(fn) {
+    var connection = this.Connect(function() {
+      connection.Disconnect();
+      fn.apply(null, arguments);
+    });
+    return connection;
+  };
+  Signal.prototype.Wait = function() {
+    var self = this;
+    return new Promise(function(resolve) {
+      self.Once(resolve);
+    });
+  };
+  Signal.prototype._fire = function() {
+    var args = arguments;
+    this._listeners.slice().forEach(function(entry) {
+      try {
+        entry.fn.apply(null, args);
+      } catch (err) {
+        console.error(
+          "WebTween: a function connected to an event had an error:",
+          err
+        );
+      }
+    });
+  };
+  Signal.prototype.connect = Signal.prototype.Connect;
+  Signal.prototype.once = Signal.prototype.Once;
+  Signal.prototype.wait = Signal.prototype.Wait;
+
+  // src/hidden/styles.js
+  var ALIASES = {
+    backgroundcolor: "background-color",
+    backgroundcolor3: "background-color",
+    textcolor: "color",
+    textcolor3: "color"
+  };
+  var TRANSFORM_NAMES = {
+    x: "X",
+    y: "Y",
+    rotation: "Rotation",
+    rotate: "Rotation",
+    scale: "Scale"
+  };
+  var NO_UNIT = [
+    "opacity",
+    "z-index",
+    "font-weight",
+    "line-height",
+    "flex-grow",
+    "flex-shrink",
+    "order",
+    "zoom"
+  ];
+  var NUMBER = /(-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)([a-z%]*)/gi;
+  function toCssName(name) {
+    if (name.indexOf("--") === 0) return name;
+    if (ALIASES[name.toLowerCase()]) return ALIASES[name.toLowerCase()];
+    return name.replace(/^[A-Z]/, function(c) {
+      return c.toLowerCase();
+    }).replace(/[A-Z]/g, function(c) {
+      return "-" + c.toLowerCase();
+    });
+  }
+  function round(n) {
+    return String(Math.round(n * 1e3) / 1e3);
+  }
+  function sameColorShape(text) {
+    return text.replace(/rgba?\(([^)]*)\)/g, function(whole, inside) {
+      var nums = inside.match(/-?(?:\d+\.?\d*|\.\d+)/g) || [];
+      if (nums.length === 3) nums.push("1");
+      return nums.length === 4 ? "rgba(" + nums.join(", ") + ")" : whole;
+    });
+  }
+  function splitNumbers(text) {
+    var parts = [], numbers = [], last = 0, match;
+    NUMBER.lastIndex = 0;
+    while (match = NUMBER.exec(text)) {
+      parts.push(text.slice(last, match.index));
+      numbers.push({ n: parseFloat(match[1]), unit: match[2] });
+      last = match.index + match[0].length;
+    }
+    parts.push(text.slice(last));
+    return { parts, numbers };
+  }
+  function currentStyle(el, cssName) {
+    return getComputedStyle(el).getPropertyValue(cssName).trim();
+  }
+  function measure(el, cssName, value) {
+    var s = el.style;
+    var oldValue = s.getPropertyValue(cssName), oldPriority = s.getPropertyPriority(cssName);
+    s.setProperty(cssName, value);
+    var result = currentStyle(el, cssName);
+    if (oldValue) s.setProperty(cssName, oldValue, oldPriority);
+    else s.removeProperty(cssName);
+    return result;
+  }
+  function parseLength(value, name) {
+    if (typeof value === "number") return { n: value, unit: "px" };
+    if (typeof value === "string") {
+      var m = value.trim().match(/^(-?(?:\d+\.?\d*|\.\d+))([a-z%]*)$/i);
+      if (m) return { n: parseFloat(m[1]), unit: m[2] || "px" };
+    }
+    throw oops(
+      name + ' should be a number (like 100) or a size (like "50%"). You gave: ' + value
+    );
+  }
+  function parseAngle(value) {
+    if (typeof value === "number") return value;
+    var m = typeof value === "string" && value.trim().match(/^(-?(?:\d+\.?\d*|\.\d+))(deg|turn|rad)?$/i);
+    if (!m)
+      throw oops(
+        "Rotation should be a number of degrees (like 90). You gave: " + value
+      );
+    var n = parseFloat(m[1]), unit = (m[2] || "deg").toLowerCase();
+    return unit === "turn" ? n * 360 : unit === "rad" ? n * 180 / Math.PI : n;
+  }
+
+  // src/hidden/memory.js
+  var elementMemory = /* @__PURE__ */ new WeakMap();
+  function memoryOf(el) {
+    var m = elementMemory.get(el);
+    if (!m) {
+      m = {
+        move: {
+          X: { n: 0, unit: "px" },
+          Y: { n: 0, unit: "px" },
+          Rotation: 0,
+          Scale: 1
+        },
+        tweens: /* @__PURE__ */ new Set(),
+        holds: 0,
+        savedTransition: ""
+      };
+      elementMemory.set(el, m);
+    }
+    return m;
+  }
+  function writeMove(el, move) {
+    el.style.transform = "translate(" + round(move.X.n) + move.X.unit + ", " + round(move.Y.n) + move.Y.unit + ") rotate(" + round(move.Rotation) + "deg) scale(" + round(move.Scale) + ")";
+  }
+
+  // src/hidden/clock.js
+  var playing = /* @__PURE__ */ new Set();
+  var frameRequest = null;
+  function onFrame() {
+    frameRequest = null;
+    var now = performance.now();
+    playing.forEach(function(tween) {
+      tween._step(now);
+    });
+    if (playing.size) frameRequest = requestAnimationFrame(onFrame);
+  }
+  function startClock() {
+    if (frameRequest === null) frameRequest = requestAnimationFrame(onFrame);
+  }
+
+  // src/public/animation/Tween.js
+  function Tween(instance, tweenInfo, goals) {
+    this.Instance = instance;
+    this.TweenInfo = tweenInfo;
+    this.PlaybackState = PlaybackState.Begin;
+    this.Completed = new Signal();
+    this._goals = readGoals(goals);
+    this._elapsed = 0;
+    this._startTime = 0;
+    this._pausedFrom = null;
+  }
+  function readGoals(goals) {
+    if (!goals || typeof goals !== "object") {
+      throw oops(
+        "The third thing you give Create should be a list of goals, like { X: 100, Transparency: 0.5 }."
+      );
+    }
+    return Object.keys(goals).map(function(name) {
+      var value = goals[name];
+      var moveName = TRANSFORM_NAMES[name.toLowerCase()];
+      if (moveName) {
+        var target = moveName === "Rotation" ? parseAngle(value) : moveName === "Scale" ? Number(value) : parseLength(value, moveName);
+        if (moveName === "Scale" && isNaN(target))
+          throw oops(
+            "Scale should be a number (1 is normal size). You gave: " + value
+          );
+        return {
+          id: "move:" + moveName,
+          kind: "move",
+          key: moveName,
+          target
+        };
+      }
+      var cssName, text;
+      if (name.toLowerCase() === "transparency") {
+        cssName = "opacity";
+        text = String(1 - Number(value));
+      } else {
+        cssName = toCssName(name);
+        if (typeof value === "number") {
+          text = NO_UNIT.indexOf(cssName) >= 0 || cssName.indexOf("--") === 0 ? String(value) : value + "px";
+        } else if (typeof value === "string") {
+          text = value;
+        } else {
+          throw oops(
+            'The goal for "' + name + '" should be a number or text, like 100 or "red".'
+          );
+        }
+      }
+      if (cssName.indexOf("--") !== 0 && typeof CSS !== "undefined" && CSS.supports && !CSS.supports(cssName, text)) {
+        throw oops(
+          `Can't animate "` + name + '" to "' + text + '". Check the spelling of the name and the value.'
+        );
+      }
+      return {
+        id: "css:" + cssName,
+        kind: "css",
+        cssName,
+        target: text
+      };
+    });
+  }
+  Tween.prototype._isRunning = function() {
+    var s = this.PlaybackState;
+    return s === "Playing" || s === "Delayed" || s === "Paused";
+  };
+  Tween.prototype._touchesSameThing = function(other) {
+    return this._goals.some(function(a) {
+      return other._goals.some(function(b) {
+        return a.id === b.id;
+      });
+    });
+  };
+  Tween.prototype._hold = function() {
+    var m = memoryOf(this.Instance);
+    if (m.holds++ === 0) {
+      m.savedTransition = this.Instance.style.transition;
+      this.Instance.style.transition = "none";
+    }
+  };
+  Tween.prototype._release = function() {
+    var el = this.Instance, m = memoryOf(el);
+    m.tweens.delete(this);
+    if (--m.holds === 0) {
+      void getComputedStyle(el).opacity;
+      el.style.transition = m.savedTransition;
+    }
+  };
+  Tween.prototype._capture = function() {
+    var el = this.Instance, move = memoryOf(el).move;
+    this._goals.forEach(function(goal) {
+      if (goal.kind === "move") {
+        if (goal.key === "X" || goal.key === "Y") {
+          var start = move[goal.key];
+          goal.start = start.unit === goal.target.unit ? { n: start.n, unit: start.unit } : { n: 0, unit: goal.target.unit };
+        } else {
+          goal.start = move[goal.key];
+        }
+        return;
+      }
+      goal.startText = sameColorShape(currentStyle(el, goal.cssName));
+      var endText = sameColorShape(measure(el, goal.cssName, goal.target));
+      goal.from = splitNumbers(goal.startText);
+      goal.to = splitNumbers(endText);
+      goal.canBlend = goal.from.numbers.length === goal.to.numbers.length && goal.to.numbers.length > 0;
+      if (!goal.canBlend && goal.startText !== endText) {
+        console.warn(
+          'WebTween: "' + goal.cssName + `" can't change smoothly from "` + goal.startText + '" to "' + endText + '", so it will switch halfway through.'
+        );
+      }
+    });
+  };
+  Tween.prototype._apply = function(alpha) {
+    var el = this.Instance, m = memoryOf(el), moved = false;
+    this._goals.forEach(function(goal) {
+      if (goal.kind === "move") {
+        moved = true;
+        if (goal.key === "X" || goal.key === "Y") {
+          m.move[goal.key] = {
+            n: goal.start.n + (goal.target.n - goal.start.n) * alpha,
+            unit: goal.target.unit
+          };
+        } else {
+          m.move[goal.key] = goal.start + (goal.target - goal.start) * alpha;
+        }
+        return;
+      }
+      var text;
+      if (!goal.canBlend) {
+        text = alpha < 0.5 ? goal.startText : goal.target;
+      } else {
+        text = goal.to.parts[0];
+        for (var i = 0; i < goal.to.numbers.length; i++) {
+          var a = goal.from.numbers[i], b = goal.to.numbers[i];
+          if (a.unit === b.unit) {
+            text += round(a.n + (b.n - a.n) * alpha) + b.unit;
+          } else {
+            text += "calc(" + round(a.n * (1 - alpha)) + (a.unit || "px") + " + " + round(b.n * alpha) + (b.unit || "px") + ")";
+          }
+          text += goal.to.parts[i + 1];
+        }
+      }
+      el.style.setProperty(goal.cssName, text);
+    });
+    if (moved) writeMove(el, m.move);
+  };
+  Tween.prototype._applyEnd = function(backAtStart) {
+    var el = this.Instance, m = memoryOf(el), moved = false;
+    this._goals.forEach(function(goal) {
+      if (goal.kind === "move") {
+        moved = true;
+        m.move[goal.key] = backAtStart ? goal.start : goal.target;
+      } else {
+        el.style.setProperty(
+          goal.cssName,
+          backAtStart ? goal.startText : goal.target
+        );
+      }
+    });
+    if (moved) writeMove(el, m.move);
+  };
+  Tween.prototype._step = function(now) {
+    var info = this.TweenInfo;
+    var elapsed = this._elapsed = Math.max(0, now - this._startTime) / 1e3;
+    var oneCycle = info.DelayTime + info.Time * (info.Reverses ? 2 : 1);
+    var cycles = info.RepeatCount < 0 ? Infinity : info.RepeatCount + 1;
+    var cycle = oneCycle > 0 ? Math.floor(elapsed / oneCycle) : Infinity;
+    if (cycle >= cycles) return this._finish();
+    var inCycle = elapsed - cycle * oneCycle;
+    if (inCycle < info.DelayTime) {
+      this.PlaybackState = PlaybackState.Delayed;
+      if (cycle > 0) this._apply(0);
+      return;
+    }
+    this.PlaybackState = PlaybackState.Playing;
+    var progress = info.Time > 0 ? (inCycle - info.DelayTime) / info.Time : 1;
+    if (info.Reverses && progress > 1) progress = 2 - progress;
+    this._apply(ease(progress, info.EasingStyle, info.EasingDirection));
+  };
+  Tween.prototype._finish = function() {
+    playing.delete(this);
+    this._applyEnd(this.TweenInfo.Reverses);
+    this.PlaybackState = PlaybackState.Completed;
+    this._release();
+    this.Completed._fire(PlaybackState.Completed);
+  };
+  Tween.prototype.Play = function() {
+    var state = this.PlaybackState;
+    if (state === "Playing" || state === "Delayed") return;
+    var now = performance.now();
+    if (state === "Paused") {
+      this._startTime = now - this._elapsed * 1e3;
+      this.PlaybackState = this._pausedFrom;
+      playing.add(this);
+      startClock();
+      return;
+    }
+    var self = this, m = memoryOf(this.Instance);
+    this._hold();
+    m.tweens.forEach(function(other) {
+      if (other !== self && other._isRunning() && other._touchesSameThing(self))
+        other.Cancel();
+    });
+    m.tweens.add(this);
+    this._capture();
+    this._startTime = now;
+    this._elapsed = 0;
+    playing.add(this);
+    this._step(now);
+    startClock();
+  };
+  Tween.prototype.Pause = function() {
+    var state = this.PlaybackState;
+    if (state !== "Playing" && state !== "Delayed") return;
+    this._elapsed = (performance.now() - this._startTime) / 1e3;
+    this._pausedFrom = state;
+    this.PlaybackState = PlaybackState.Paused;
+    playing.delete(this);
+  };
+  Tween.prototype.Cancel = function() {
+    if (!this._isRunning()) return;
+    playing.delete(this);
+    this.PlaybackState = PlaybackState.Cancelled;
+    this._release();
+    this.Completed._fire(PlaybackState.Cancelled);
+  };
+  Tween.prototype.play = Tween.prototype.Play;
+  Tween.prototype.pause = Tween.prototype.Pause;
+  Tween.prototype.cancel = Tween.prototype.Cancel;
+
+  // src/public/animation/TweenService.js
+  var TweenService = {
+    /**
+     * Make a tween.
+     *   thing:     an element, or a CSS selector like "#box" or ".card"
+     *   tweenInfo: a TweenInfo (or leave it out for the default: 1 second, Quad, Out)
+     *   goals:     what it should look like at the end, e.g. { X: 100, Transparency: 0.5 }
+     */
+    Create: function(thing, tweenInfo, goals) {
+      var el = thing;
+      if (typeof thing === "string") {
+        el = document.querySelector(thing);
+        if (!el)
+          throw oops(
+            `Couldn't find anything on the page matching "` + thing + '".'
+          );
+      }
+      if (!el || el.nodeType !== 1) {
+        throw oops(
+          'The first thing you give Create should be an element on the page, or a selector like "#box".'
+        );
+      }
+      if (!(tweenInfo instanceof TweenInfo))
+        tweenInfo = new TweenInfo(tweenInfo || void 0);
+      return new Tween(el, tweenInfo, goals);
+    },
+    /** Get an eased value between 0 and 1, without animating anything. */
+    GetValue: function(alpha, easingStyle, easingDirection) {
+      return ease(
+        alpha,
+        pickName(easingStyle, EasingStyle, "easing style"),
+        pickName(easingDirection, EasingDirection, "easing direction")
+      );
+    }
+  };
+  TweenService.create = TweenService.Create;
+
+  // src/public/animation/Color3.js
+  var Color3 = {
+    fromRGB: function(r, g, b) {
+      return "rgb(" + r + ", " + g + ", " + b + ")";
+    },
+    new: function(r, g, b) {
+      return "rgb(" + r * 255 + ", " + g * 255 + ", " + b * 255 + ")";
+    },
+    fromHex: function(hex) {
+      return hex.charAt(0) === "#" ? hex : "#" + hex;
+    }
+  };
+
+  // src/public/animation/ScrollableFrame.js
+  function ScrollableFrame(src, keyframeEvents, keyframeTriggers, options) {
+    if (!(this instanceof ScrollableFrame)) {
+      return new ScrollableFrame(src, keyframeEvents, keyframeTriggers, options);
+    }
+    if (typeof src !== "string" || !src) {
+      throw oops('ScrollableFrame needs the path to a video, like "videos/intro.mp4".');
+    }
+    keyframeEvents = keyframeEvents || [];
+    keyframeTriggers = keyframeTriggers || [];
+    if (!Array.isArray(keyframeEvents) || !Array.isArray(keyframeTriggers)) {
+      throw oops("keyframeEvents and keyframeTriggers should both be lists, like [flyIn, fadeOut] and [5, 40].");
+    }
+    if (keyframeEvents.length !== keyframeTriggers.length) {
+      throw oops(
+        "You gave " + keyframeEvents.length + " keyframe events but " + keyframeTriggers.length + " keyframe triggers. Each event needs one frame number to go with it."
+      );
+    }
+    this._triggers = keyframeTriggers.map(function(frame, i) {
+      if (typeof keyframeEvents[i] !== "function") {
+        throw oops("Keyframe event number " + (i + 1) + " should be a function.");
+      }
+      if (typeof frame !== "number" || !(frame >= 0)) {
+        throw oops("Keyframe trigger number " + (i + 1) + " should be a frame number, 0 or more. You gave: " + frame);
+      }
+      return { frame: Math.floor(frame), fn: keyframeEvents[i] };
+    });
+    this._triggers.sort(function(a, b) {
+      return a.frame - b.frame;
+    });
+    options = options || {};
+    var parent = options.Parent || document.body;
+    if (typeof parent === "string") {
+      var found = document.querySelector(parent);
+      if (!found) throw oops(`Couldn't find anything on the page matching "` + parent + '" to put the ScrollableFrame in.');
+      parent = found;
+    }
+    this.FrameRate = options.FrameRate || 30;
+    this.ScrollLength = options.ScrollLength || 3;
+    this.Smoothness = options.Smoothness === void 0 ? 0.15 : Math.min(1, Math.max(0.01, options.Smoothness));
+    this.StickToLastFrame = !!(options.StickToLastFrame || options.stickToLastFrame);
+    this.StuckFrame = !!(options.StuckFrame || options.stuckFrame);
+    this.Frame = 0;
+    this.Progress = 0;
+    this.FrameChanged = new Signal();
+    var box = document.createElement("div");
+    box.className = "webtween-scrollable-frame";
+    box.style.position = "relative";
+    box.style.height = this.ScrollLength * 100 + "vh";
+    var stage = document.createElement("div");
+    stage.style.cssText = "position: sticky; top: 0; height: 100vh; overflow: hidden;";
+    if (this.StuckFrame) {
+      box.style.height = "0";
+      stage.style.cssText = "position: fixed; inset: 0; z-index: -1; overflow: hidden;";
+    }
+    var video = document.createElement("video");
+    video.src = src;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.setAttribute("muted", "");
+    video.setAttribute("playsinline", "");
+    video.style.cssText = "width: 100%; height: 100%; object-fit: cover; display: block;";
+    stage.appendChild(video);
+    box.appendChild(stage);
+    parent.appendChild(box);
+    this.Instance = box;
+    this.Stage = stage;
+    this.Video = video;
+    this._stuck = false;
+    if (this.StickToLastFrame && !this.StuckFrame) {
+      this._backdrop = document.createElement("div");
+      this._backdrop.className = "webtween-scrollable-frame-backdrop";
+      this._backdrop.style.cssText = "position: fixed; inset: 0; z-index: -1; pointer-events: none;";
+      document.body.appendChild(this._backdrop);
+    }
+    var self = this;
+    this._ready = false;
+    this._shownTime = 0;
+    this._lastFrame = -1;
+    video.addEventListener("loadedmetadata", function() {
+      self._ready = true;
+      var lastFrame = Math.floor(video.duration * self.FrameRate);
+      self._triggers.forEach(function(t) {
+        if (t.frame > lastFrame) {
+          console.warn("WebTween: keyframe trigger " + t.frame + " is past the end of the video (about " + lastFrame + " frames).");
+        }
+      });
+      var attempt = video.play();
+      if (attempt && attempt.then) {
+        attempt.then(function() {
+          video.pause();
+        }).catch(function() {
+        });
+      }
+    });
+    video.addEventListener("error", function() {
+      console.error(`WebTween: couldn't load the video "` + src + '". Check that the path is right.');
+    });
+    this._tick = this._tick.bind(this);
+    this._frameRequest = requestAnimationFrame(this._tick);
+  }
+  ScrollableFrame.prototype._tick = function() {
+    this._frameRequest = requestAnimationFrame(this._tick);
+    var video = this.Video;
+    if (!this._ready || !video.duration) return;
+    var distance = this.Instance.offsetHeight - window.innerHeight;
+    var scrolled = -this.Instance.getBoundingClientRect().top;
+    if (this.StuckFrame) {
+      distance = document.documentElement.scrollHeight - window.innerHeight;
+      scrolled = window.scrollY;
+    }
+    this.Progress = distance > 0 ? Math.min(1, Math.max(0, scrolled / distance)) : 0;
+    if (this._backdrop) this._setStuck(distance > 0 && scrolled >= distance);
+    var targetTime = this.Progress * video.duration;
+    this._shownTime += (targetTime - this._shownTime) * this.Smoothness;
+    if (Math.abs(targetTime - this._shownTime) < 1e-3) this._shownTime = targetTime;
+    if (!video.seeking && Math.abs(video.currentTime - this._shownTime) > 0.5 / this.FrameRate) {
+      video.currentTime = this._shownTime;
+    }
+    var frame = Math.floor(this._shownTime * this.FrameRate + 1e-6);
+    if (frame !== this._lastFrame) {
+      this._runTriggers(this._lastFrame, frame);
+      this._lastFrame = frame;
+      this.Frame = frame;
+      this.FrameChanged._fire(frame);
+    }
+  };
+  ScrollableFrame.prototype._runTriggers = function(from, to) {
+    var passed;
+    if (to > from) {
+      passed = this._triggers.filter(function(t) {
+        return t.frame > from && t.frame <= to;
+      });
+      passed.forEach(function(t) {
+        safeCall(t.fn, "Forward");
+      });
+    } else {
+      passed = this._triggers.filter(function(t) {
+        return t.frame <= from && t.frame > to;
+      });
+      passed.reverse().forEach(function(t) {
+        safeCall(t.fn, "Backward");
+      });
+    }
+  };
+  ScrollableFrame.prototype._setStuck = function(stuck) {
+    if (stuck === this._stuck) return;
+    this._stuck = stuck;
+    if (stuck) this._backdrop.appendChild(this.Video);
+    else this.Stage.insertBefore(this.Video, this.Stage.firstChild);
+  };
+  function safeCall(fn, direction) {
+    try {
+      fn(direction);
+    } catch (err) {
+      console.error("WebTween: a keyframe event had an error:", err);
+    }
+  }
+  ScrollableFrame.prototype.Destroy = function() {
+    cancelAnimationFrame(this._frameRequest);
+    this._tick = function() {
+    };
+    this.Instance.remove();
+    if (this._backdrop) this._backdrop.remove();
+  };
+  ScrollableFrame.prototype.destroy = ScrollableFrame.prototype.Destroy;
+  ScrollableFrame["new"] = function(a, b, c, d) {
+    return new ScrollableFrame(a, b, c, d);
+  };
+
+  // src/hidden/pageStyles.js
+  var addedStyles = {};
+  function addStyles(name, css) {
+    if (addedStyles[name]) return;
+    addedStyles[name] = true;
+    var style = document.createElement("style");
+    style.setAttribute("data-webtween", name);
+    style.textContent = css;
+    var head = document.head || document.documentElement;
+    head.insertBefore(style, head.firstChild);
+  }
+  function findElement(thing, what) {
+    if (typeof thing !== "string") return thing;
+    var found = document.querySelector(thing);
+    if (!found) throw oops(`Couldn't find anything on the page matching "` + thing + '" to put the ' + what + " in.");
+    return found;
+  }
+
+  // src/public/elements/Card.js
+  function Card(settings) {
+    if (!(this instanceof Card)) return new Card(settings);
+    settings = settings || {};
+    addStyles("Card", CARD_CSS);
+    this.Instance = document.createElement("div");
+    this.Instance.className = "webtween-card";
+    if (settings.Color) this.Instance.style.backgroundColor = settings.Color;
+    if (settings.TextColor) this.Instance.style.color = settings.TextColor;
+    if (settings.Image) {
+      this.Image = document.createElement("img");
+      this.Image.src = settings.Image;
+      this.Image.alt = settings.Title || "";
+      this.Instance.appendChild(this.Image);
+    }
+    if (settings.Title) {
+      this.Title = document.createElement("h2");
+      this.Title.textContent = settings.Title;
+      this.Instance.appendChild(this.Title);
+    }
+    if (settings.Description) {
+      this.Description = document.createElement("p");
+      this.Description.textContent = settings.Description;
+      this.Instance.appendChild(this.Description);
+    }
+    if (settings.Parent) findElement(settings.Parent, "Card").appendChild(this.Instance);
+  }
+  Card.prototype.Destroy = function() {
+    this.Instance.remove();
+  };
+  Card.prototype.destroy = Card.prototype.Destroy;
+  Card["new"] = function(settings) {
+    return new Card(settings);
+  };
+  var CARD_CSS = [
+    ".webtween-card {",
+    "  width: 160px; height: 220px; box-sizing: border-box; padding: 12px;",
+    "  border-radius: 16px; background: #444; color: white;",
+    "  font: 14px system-ui, sans-serif; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);",
+    "}",
+    ".webtween-card img {",
+    "  display: block; width: 100%; height: 100px; object-fit: cover;",
+    "  border-radius: 10px; background: rgba(255, 255, 255, 0.2);",
+    "}",
+    ".webtween-card h2 { margin: 10px 0 4px; font-size: 20px; }",
+    ".webtween-card p { margin: 0; opacity: 0.85; }"
+  ].join("\n");
+
+  // src/public/buildReferences/Carousel.js
+  function Carousel(cards, settings) {
+    if (!(this instanceof Carousel)) return new Carousel(cards, settings);
+    if (!Array.isArray(cards) || cards.length === 0) {
+      throw oops('Carousel needs a list of cards, like [cat, dog] or [{ Title: "Cat" }].');
+    }
+    settings = settings || {};
+    addStyles("Card", CARD_CSS);
+    addStyles("Carousel", CAROUSEL_CSS);
+    this.Radius = pick(settings.Radius, 250);
+    this.EasingStyle = pickName(pick(settings.EasingStyle, "Back"), EasingStyle, "easing style");
+    this.Duration = pick(settings.Duration, 1);
+    this.AutoSpinEvery = pick(settings.AutoSpinEvery, 3);
+    this.PauseAfterScroll = pick(settings.PauseAfterScroll, 4);
+    this.ScrollSensitivity = pick(settings.ScrollSensitivity, 60);
+    this.Instance = document.createElement("div");
+    this.Instance.className = "webtween-carousel";
+    this.Cards = cards.map(function(card) {
+      return card instanceof Card ? card : new Card(card);
+    });
+    var ring = this.Instance;
+    this.Cards.forEach(function(card) {
+      ring.appendChild(card.Instance);
+    });
+    findElement(settings.Parent || document.body, "Carousel").appendChild(ring);
+    this._spin = 0;
+    this._from = 0;
+    this._to = 0;
+    this._startTime = 0;
+    this._lastSpinTime = performance.now();
+    this._lastScrollTime = -Infinity;
+    this._wheelBuildUp = 0;
+    this._onWheel = this._onWheel.bind(this);
+    ring.addEventListener("wheel", this._onWheel, { passive: false });
+    this._everyFrame = this._everyFrame.bind(this);
+    this._frameRequest = requestAnimationFrame(this._everyFrame);
+  }
+  function pick(value, fallback) {
+    return value === void 0 ? fallback : value;
+  }
+  Carousel.prototype._step = function() {
+    return 360 / this.Cards.length;
+  };
+  Carousel.prototype._spinTo = function(target) {
+    this._from = this._spin;
+    this._to = target;
+    this._startTime = this._lastSpinTime = performance.now();
+  };
+  Carousel.prototype.Next = function() {
+    this._spinTo(this._to - this._step());
+  };
+  Carousel.prototype.Previous = function() {
+    this._spinTo(this._to + this._step());
+  };
+  Carousel.prototype._everyFrame = function(now) {
+    this._frameRequest = requestAnimationFrame(this._everyFrame);
+    var quietFor = (now - this._lastScrollTime) / 1e3;
+    var sinceSpin = (now - this._lastSpinTime) / 1e3;
+    if (this.AutoSpinEvery > 0 && quietFor >= this.PauseAfterScroll && sinceSpin >= this.AutoSpinEvery) {
+      this.Next();
+    }
+    var alpha = this.Duration > 0 ? Math.min(1, (now - this._startTime) / 1e3 / this.Duration) : 1;
+    var eased = TweenService.GetValue(alpha, this.EasingStyle, "Out");
+    this._spin = this._from + (this._to - this._from) * eased;
+    var step = this._step(), spin = this._spin, radius = this.Radius;
+    this.Cards.forEach(function(card, i) {
+      card.Instance.style.transform = "rotateY(" + round(spin + i * step) + "deg) translateZ(" + radius + "px)";
+    });
+  };
+  Carousel.prototype._onWheel = function(e) {
+    e.preventDefault();
+    this._wheelBuildUp += e.deltaY;
+    if (Math.abs(this._wheelBuildUp) < this.ScrollSensitivity) return;
+    var down = this._wheelBuildUp > 0;
+    this._wheelBuildUp = 0;
+    this._lastScrollTime = performance.now();
+    if (down) this.Next();
+    else this.Previous();
+  };
+  Carousel.prototype.Destroy = function() {
+    cancelAnimationFrame(this._frameRequest);
+    this._everyFrame = function() {
+    };
+    this.Instance.removeEventListener("wheel", this._onWheel);
+    this.Instance.remove();
+  };
+  Carousel.prototype.destroy = Carousel.prototype.Destroy;
+  Carousel.prototype.next = Carousel.prototype.Next;
+  Carousel.prototype.previous = Carousel.prototype.Previous;
+  Carousel["new"] = function(cards, settings) {
+    return new Carousel(cards, settings);
+  };
+  var CAROUSEL_CSS = [
+    ".webtween-carousel {",
+    "  position: relative; height: 100vh;",
+    "  perspective: 1000px; /* how strong the 3D looks: smaller = more dramatic */",
+    "  transform-style: preserve-3d; /* lets the browser work out which card is in front */",
+    "}",
+    ".webtween-carousel .webtween-card {",
+    "  position: absolute; left: 50%; top: 50%;",
+    "  margin: -110px 0 0 -80px; /* half the card's size, so it's centred */",
+    "}"
+  ].join("\n");
+
+  // src/index.js
+  var WebTween = {
+    // animation
+    TweenService,
+    TweenInfo,
+    Enum,
+    Color3,
+    Tween,
+    ScrollableFrame,
+    // elements
+    Card,
+    // build references
+    Carousel
+  };
+  window.WebTween = WebTween;
+  ["TweenService", "TweenInfo", "Enum", "Color3", "ScrollableFrame", "Card", "Carousel"].forEach(function(name) {
+    if (window[name] === void 0) window[name] = WebTween[name];
+  });
+})();

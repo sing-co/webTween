@@ -1,0 +1,15 @@
+# Ignore everything by default, then let through only the WebTween engine
+# and what's needed to build it. To share something else, add a "!" line.
+
+/*
+!/.gitignore
+
+# The engine
+!/webTween/
+/webTween/*
+!/webTween/src/
+!/webTween/build.mjs
+!/webTween/package.json
+!/webTween/package-lock.json
+!/webTween/README.md
+!/webTween/webtween.js
