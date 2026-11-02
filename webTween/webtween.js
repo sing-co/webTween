@@ -622,6 +622,24 @@
     }
   };
 
+  // src/hidden/pageStyles.js
+  var addedStyles = {};
+  function addStyles(name, css) {
+    if (addedStyles[name]) return;
+    addedStyles[name] = true;
+    var style = document.createElement("style");
+    style.setAttribute("data-webtween", name);
+    style.textContent = css;
+    var head = document.head || document.documentElement;
+    head.insertBefore(style, head.firstChild);
+  }
+  function findElement(thing, what) {
+    if (typeof thing !== "string") return thing;
+    var found = document.querySelector(thing);
+    if (!found) throw oops(`Couldn't find anything on the page matching "` + thing + '" to put the ' + what + " in.");
+    return found;
+  }
+
   // src/public/animation/ScrollableFrame.js
   function ScrollableFrame(src, keyframeEvents, keyframeTriggers, options) {
     if (!(this instanceof ScrollableFrame)) {
@@ -691,6 +709,17 @@
     this.Instance = box;
     this.Stage = stage;
     this.Video = video;
+    this._skipped = false;
+    if (options.SkipButton !== false) {
+      addStyles("ScrollableFrame", SKIP_CSS);
+      var skip = document.createElement("button");
+      skip.type = "button";
+      skip.className = "webtween-skip";
+      skip.textContent = options.SkipText || "Skip the animation";
+      skip.addEventListener("click", this.Skip.bind(this));
+      stage.appendChild(skip);
+      this.SkipButton = skip;
+    }
     this._stuck = false;
     if (this.StickToLastFrame && !this.StuckFrame) {
       this._backdrop = document.createElement("div");
@@ -736,6 +765,9 @@
     }
     this.Progress = distance > 0 ? Math.min(1, Math.max(0, scrolled / distance)) : 0;
     if (this._backdrop) this._setStuck(distance > 0 && scrolled >= distance);
+    if (this._skipped && this.Progress === 0) this._skipped = false;
+    if (this._skipped) this.Progress = 1;
+    if (this.SkipButton) this.SkipButton.classList.toggle("webtween-skip-done", this.Progress >= 0.999);
     var targetTime = this.Progress * video.duration;
     this._shownTime += (targetTime - this._shownTime) * this.Smoothness;
     if (Math.abs(targetTime - this._shownTime) < 1e-3) this._shownTime = targetTime;
@@ -781,6 +813,15 @@
       console.error("WebTween: a keyframe event had an error:", err);
     }
   }
+  ScrollableFrame.prototype.Skip = function() {
+    if (this.StuckFrame) {
+      this._skipped = true;
+    } else {
+      var after = window.scrollY + this.Instance.getBoundingClientRect().bottom;
+      window.scrollTo({ top: after, behavior: "instant" });
+    }
+    if (this.Video.duration) this._shownTime = this.Video.duration;
+  };
   ScrollableFrame.prototype.Destroy = function() {
     cancelAnimationFrame(this._frameRequest);
     this._tick = function() {
@@ -789,27 +830,145 @@
     if (this._backdrop) this._backdrop.remove();
   };
   ScrollableFrame.prototype.destroy = ScrollableFrame.prototype.Destroy;
+  ScrollableFrame.prototype.skip = ScrollableFrame.prototype.Skip;
+  var SKIP_CSS = [
+    ".webtween-skip {",
+    "  position: absolute; left: 50%; bottom: 24px; z-index: 2; /* above anything else you put on the video */",
+    "  transform: translateX(-50%);",
+    "  min-height: 44px; padding: 0 18px; border: 0; border-radius: 0;",
+    "  background: rgba(0, 0, 0, 0.55); color: #fff;",
+    "  font: 500 14px/1 system-ui, sans-serif; cursor: pointer;",
+    "  transition: opacity 0.4s, visibility 0.4s, background-color 0.2s;",
+    "}",
+    ".webtween-skip:hover { background: rgba(0, 0, 0, 0.8); }",
+    ".webtween-skip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }",
+    ".webtween-skip.webtween-skip-done { opacity: 0; visibility: hidden; pointer-events: none; }"
+  ].join("\n");
   ScrollableFrame["new"] = function(a, b, c, d) {
     return new ScrollableFrame(a, b, c, d);
   };
 
-  // src/hidden/pageStyles.js
-  var addedStyles = {};
-  function addStyles(name, css) {
-    if (addedStyles[name]) return;
-    addedStyles[name] = true;
-    var style = document.createElement("style");
-    style.setAttribute("data-webtween", name);
-    style.textContent = css;
-    var head = document.head || document.documentElement;
-    head.insertBefore(style, head.firstChild);
+  // src/hidden/targets.js
+  function findAll(things, what) {
+    var list;
+    if (typeof things === "string") list = Array.prototype.slice.call(document.querySelectorAll(things));
+    else if (things && typeof things.length === "number") list = Array.prototype.slice.call(things);
+    else if (things) list = [things];
+    else list = [];
+    list = list.map(function(thing) {
+      return thing && thing.Instance instanceof Element ? thing.Instance : thing;
+    });
+    list.forEach(function(el) {
+      if (!(el instanceof Element)) throw oops(what + ' needs page elements, a selector like ".card", or Cards.');
+    });
+    return list;
   }
-  function findElement(thing, what) {
-    if (typeof thing !== "string") return thing;
-    var found = document.querySelector(thing);
-    if (!found) throw oops(`Couldn't find anything on the page matching "` + thing + '" to put the ' + what + " in.");
-    return found;
+  function wantsLessMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
+
+  // src/public/animation/Reveal.js
+  function Reveal(things, settings) {
+    if (!(this instanceof Reveal)) return new Reveal(things, settings);
+    settings = settings || {};
+    this.Distance = pick(settings.Distance, 28);
+    this.Time = pick(settings.Time, 0.9);
+    this.EasingStyle = pickName(pick(settings.EasingStyle, "Quint"), EasingStyle, "easing style");
+    this.Stagger = pick(settings.Stagger, 0.08);
+    this.Threshold = pick(settings.Threshold, 0.15);
+    this.Elements = findAll(things, "Reveal");
+    if (wantsLessMotion() || !window.IntersectionObserver) return;
+    var self = this;
+    this.Elements.forEach(function(el) {
+      TweenService.Create(el, new TweenInfo(0), { Y: self.Distance, Transparency: 1 }).Play();
+    });
+    this._watcher = new IntersectionObserver(function(entries) {
+      var arriving = entries.filter(function(entry) {
+        return entry.isIntersecting;
+      });
+      arriving.forEach(function(entry, i) {
+        self._watcher.unobserve(entry.target);
+        self._show(entry.target, i * self.Stagger);
+      });
+    }, { threshold: this.Threshold });
+    this.Elements.forEach(function(el) {
+      self._watcher.observe(el);
+    });
+  }
+  function pick(value, fallback) {
+    return value === void 0 ? fallback : value;
+  }
+  Reveal.prototype._show = function(el, delay) {
+    var info = new TweenInfo(this.Time, this.EasingStyle, "Out", 0, false, delay);
+    TweenService.Create(el, info, { Y: 0, Transparency: 0 }).Play();
+  };
+  Reveal.prototype.ShowAll = function() {
+    var self = this;
+    if (this._watcher) this._watcher.disconnect();
+    this.Elements.forEach(function(el, i) {
+      self._show(el, i * self.Stagger);
+    });
+  };
+  Reveal.prototype.Destroy = function() {
+    if (this._watcher) this._watcher.disconnect();
+  };
+  Reveal.prototype.showAll = Reveal.prototype.ShowAll;
+  Reveal.prototype.destroy = Reveal.prototype.Destroy;
+  Reveal["new"] = function(things, settings) {
+    return new Reveal(things, settings);
+  };
+
+  // src/public/animation/Parallax.js
+  function Parallax(things, settings) {
+    if (!(this instanceof Parallax)) return new Parallax(things, settings);
+    settings = settings || {};
+    this.Speed = settings.Speed === void 0 ? 0.1 : settings.Speed;
+    this.Elements = findAll(things, "Parallax");
+    this._offsets = this.Elements.map(function() {
+      return 0;
+    });
+    if (wantsLessMotion()) return;
+    this._update = this._update.bind(this);
+    this._onScroll = function() {
+      if (!this._waiting) {
+        this._waiting = true;
+        requestAnimationFrame(this._update);
+      }
+    }.bind(this);
+    window.addEventListener("scroll", this._onScroll, { passive: true });
+    window.addEventListener("resize", this._onScroll);
+    this._update();
+  }
+  Parallax.prototype._speedOf = function(i) {
+    return Array.isArray(this.Speed) ? this.Speed[i] || 0 : this.Speed;
+  };
+  Parallax.prototype._update = function() {
+    this._waiting = false;
+    var middle = window.innerHeight / 2;
+    var self = this;
+    this.Elements.forEach(function(el, i) {
+      var box = el.getBoundingClientRect();
+      var centre = box.top - self._offsets[i] + box.height / 2;
+      var offset = (middle - centre) * self._speedOf(i);
+      self._offsets[i] = offset;
+      el.style.transform = "translateY(" + round(offset) + "px)";
+    });
+  };
+  Parallax.prototype.Destroy = function() {
+    if (this._onScroll) {
+      window.removeEventListener("scroll", this._onScroll);
+      window.removeEventListener("resize", this._onScroll);
+    }
+    this._update = function() {
+    };
+    this.Elements.forEach(function(el) {
+      el.style.transform = "";
+    });
+  };
+  Parallax.prototype.destroy = Parallax.prototype.Destroy;
+  Parallax["new"] = function(things, settings) {
+    return new Parallax(things, settings);
+  };
 
   // src/public/elements/Card.js
   function Card(settings) {
@@ -859,6 +1018,62 @@
     ".webtween-card p { margin: 0; opacity: 0.85; }"
   ].join("\n");
 
+  // src/public/elements/ImageCard.js
+  function ImageCard(settings) {
+    if (!(this instanceof ImageCard)) return new ImageCard(settings);
+    settings = settings || {};
+    addStyles("ImageCard", IMAGE_CARD_CSS);
+    this.Instance = document.createElement("div");
+    this.Instance.className = "webtween-imagecard";
+    this.AspectRatio = readAspectRatio(settings.AspectRatio === void 0 ? 1 : settings.AspectRatio);
+    this.Instance.style.aspectRatio = String(this.AspectRatio);
+    if (settings.Width !== void 0) {
+      this.Instance.style.width = typeof settings.Width === "number" ? settings.Width + "px" : settings.Width;
+    }
+    this.Image = document.createElement("img");
+    if (settings.Image) this.Image.src = settings.Image;
+    this.Image.alt = settings.Title || "";
+    this.Instance.appendChild(this.Image);
+    if (settings.Title) {
+      this.Title = document.createElement("span");
+      this.Title.textContent = settings.Title;
+      this.Instance.appendChild(this.Title);
+    }
+    if (settings.Parent) findElement(settings.Parent, "ImageCard").appendChild(this.Instance);
+  }
+  function readAspectRatio(value) {
+    var ratio = value;
+    if (typeof value === "string") {
+      var parts = value.split(/[:\/]/);
+      ratio = parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : parseFloat(value);
+    }
+    if (typeof ratio !== "number" || !isFinite(ratio) || ratio <= 0) {
+      throw oops('"' + value + `" isn't an aspect ratio. Try something like 1, 1.5, "16:9" or "3/4".`);
+    }
+    return ratio;
+  }
+  ImageCard.prototype.Destroy = function() {
+    this.Instance.remove();
+  };
+  ImageCard.prototype.destroy = ImageCard.prototype.Destroy;
+  ImageCard["new"] = function(settings) {
+    return new ImageCard(settings);
+  };
+  var IMAGE_CARD_CSS = [
+    ".webtween-imagecard {",
+    "  position: relative; width: 240px; overflow: hidden;",
+    "  border-radius: 16px; background: #444;",
+    "  font: 14px system-ui, sans-serif; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);",
+    "}",
+    ".webtween-imagecard img {",
+    "  display: block; width: 100%; height: 100%; object-fit: cover; /* crop, don't stretch */",
+    "}",
+    ".webtween-imagecard span {",
+    "  position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 12px 10px;",
+    "  color: white; background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));",
+    "}"
+  ].join("\n");
+
   // src/public/buildReferences/Carousel.js
   function Carousel(cards, settings) {
     if (!(this instanceof Carousel)) return new Carousel(cards, settings);
@@ -868,16 +1083,16 @@
     settings = settings || {};
     addStyles("Card", CARD_CSS);
     addStyles("Carousel", CAROUSEL_CSS);
-    this.Radius = pick(settings.Radius, 250);
-    this.EasingStyle = pickName(pick(settings.EasingStyle, "Back"), EasingStyle, "easing style");
-    this.Duration = pick(settings.Duration, 1);
-    this.AutoSpinEvery = pick(settings.AutoSpinEvery, 3);
-    this.PauseAfterScroll = pick(settings.PauseAfterScroll, 4);
-    this.ScrollSensitivity = pick(settings.ScrollSensitivity, 60);
+    this.Radius = pick2(settings.Radius, 250);
+    this.EasingStyle = pickName(pick2(settings.EasingStyle, "Back"), EasingStyle, "easing style");
+    this.Duration = pick2(settings.Duration, 1);
+    this.AutoSpinEvery = pick2(settings.AutoSpinEvery, 3);
+    this.PauseAfterScroll = pick2(settings.PauseAfterScroll, 4);
+    this.ScrollSensitivity = pick2(settings.ScrollSensitivity, 60);
     this.Instance = document.createElement("div");
     this.Instance.className = "webtween-carousel";
     this.Cards = cards.map(function(card) {
-      return card instanceof Card ? card : new Card(card);
+      return card instanceof Card || card instanceof ImageCard ? card : new Card(card);
     });
     var ring = this.Instance;
     this.Cards.forEach(function(card) {
@@ -896,7 +1111,7 @@
     this._everyFrame = this._everyFrame.bind(this);
     this._frameRequest = requestAnimationFrame(this._everyFrame);
   }
-  function pick(value, fallback) {
+  function pick2(value, fallback) {
     return value === void 0 ? fallback : value;
   }
   Carousel.prototype._step = function() {
@@ -925,7 +1140,7 @@
     this._spin = this._from + (this._to - this._from) * eased;
     var step = this._step(), spin = this._spin, radius = this.Radius;
     this.Cards.forEach(function(card, i) {
-      card.Instance.style.transform = "rotateY(" + round(spin + i * step) + "deg) translateZ(" + radius + "px)";
+      card.Instance.style.transform = "translate(-50%, -50%) rotateY(" + round(spin + i * step) + "deg) translateZ(" + radius + "px)";
     });
   };
   Carousel.prototype._onWheel = function(e) {
@@ -957,10 +1172,79 @@
     "  perspective: 1000px; /* how strong the 3D looks: smaller = more dramatic */",
     "  transform-style: preserve-3d; /* lets the browser work out which card is in front */",
     "}",
-    ".webtween-carousel .webtween-card {",
-    "  position: absolute; left: 50%; top: 50%;",
-    "  margin: -110px 0 0 -80px; /* half the card's size, so it's centred */",
+    "/* div.: beats each card's own .webtween-... styles, whichever got added first */",
+    "div.webtween-carousel > * {",
+    "  position: absolute; left: 50%; top: 50%; /* centred by the spin, whatever size the card is */",
     "}"
+  ].join("\n");
+
+  // src/public/buildReferences/Slideshow.js
+  function Slideshow(slides, settings) {
+    if (!(this instanceof Slideshow)) return new Slideshow(slides, settings);
+    if (!slides || !slides.length) {
+      throw oops('Slideshow needs a list of slides, like ["pool.jpg", "lobby.jpg"].');
+    }
+    settings = settings || {};
+    addStyles("Slideshow", SLIDESHOW_CSS);
+    this.Every = pick3(settings.Every, 6);
+    this.FadeTime = pick3(settings.FadeTime, 1.6);
+    this.EasingStyle = pickName(pick3(settings.EasingStyle, "Sine"), EasingStyle, "easing style");
+    this.Instance = document.createElement("div");
+    this.Instance.className = "webtween-slideshow";
+    var ratio = settings.AspectRatio;
+    this.Slides = Array.prototype.map.call(slides, function(slide) {
+      if (typeof slide === "string") return new ImageCard({ Image: slide, AspectRatio: ratio }).Instance;
+      return findAll(slide, "Slideshow")[0];
+    });
+    var box = this.Instance;
+    this.Slides.forEach(function(el) {
+      box.appendChild(el);
+    });
+    if (settings.Parent) findElement(settings.Parent, "Slideshow").appendChild(box);
+    this.Current = 0;
+    this._onTop = 1;
+    this.Slides.forEach(function(el, i) {
+      TweenService.Create(el, new TweenInfo(0), { Transparency: i === 0 ? 0 : 1 }).Play();
+    });
+    if (!wantsLessMotion() && this.Slides.length > 1) {
+      this._timer = setInterval(this._onTimer.bind(this), this.Every * 1e3);
+    }
+  }
+  function pick3(value, fallback) {
+    return value === void 0 ? fallback : value;
+  }
+  Slideshow.prototype._onTimer = function() {
+    if (!document.hidden) this.Next();
+  };
+  Slideshow.prototype.Next = function() {
+    this.Show((this.Current + 1) % this.Slides.length);
+  };
+  Slideshow.prototype.Show = function(n) {
+    if (n === this.Current || !this.Slides[n]) return;
+    var leaving = this.Slides[this.Current];
+    var arriving = this.Slides[n];
+    this.Current = n;
+    arriving.style.zIndex = ++this._onTop;
+    var fade = TweenService.Create(arriving, new TweenInfo(this.FadeTime, this.EasingStyle, "InOut"), { Transparency: 0 });
+    fade.Completed.Connect(function(state) {
+      if (state === "Completed") TweenService.Create(leaving, new TweenInfo(0), { Transparency: 1 }).Play();
+    });
+    fade.Play();
+  };
+  Slideshow.prototype.Destroy = function() {
+    clearInterval(this._timer);
+    this.Instance.remove();
+  };
+  Slideshow.prototype.next = Slideshow.prototype.Next;
+  Slideshow.prototype.show = Slideshow.prototype.Show;
+  Slideshow.prototype.destroy = Slideshow.prototype.Destroy;
+  Slideshow["new"] = function(slides, settings) {
+    return new Slideshow(slides, settings);
+  };
+  var SLIDESHOW_CSS = [
+    ".webtween-slideshow { position: relative; isolation: isolate; /* the slides' stacking stays inside it */ }",
+    "/* div.: beats each slide's own .webtween-... styles */",
+    "div.webtween-slideshow > :not(:first-child) { position: absolute; inset: 0; }"
   ].join("\n");
 
   // src/index.js
@@ -972,13 +1256,29 @@
     Color3,
     Tween,
     ScrollableFrame,
+    Reveal,
+    Parallax,
     // elements
     Card,
+    ImageCard,
     // build references
-    Carousel
+    Carousel,
+    Slideshow
   };
   window.WebTween = WebTween;
-  ["TweenService", "TweenInfo", "Enum", "Color3", "ScrollableFrame", "Card", "Carousel"].forEach(function(name) {
+  [
+    "TweenService",
+    "TweenInfo",
+    "Enum",
+    "Color3",
+    "ScrollableFrame",
+    "Reveal",
+    "Parallax",
+    "Card",
+    "ImageCard",
+    "Carousel",
+    "Slideshow"
+  ].forEach(function(name) {
     if (window[name] === void 0) window[name] = WebTween[name];
   });
 })();

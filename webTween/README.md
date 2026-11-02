@@ -143,7 +143,8 @@ function flyInLogo(direction) {
 | `ScrollLength` | How many screens of scrolling it takes to get through the whole video | `3` |
 | `Smoothness` | How quickly the video catches up to the scroll. `1` = instantly, `0.05` = very floaty | `0.15` |
 | `StickToLastFrame` | `true` keeps the last frame as the page's background once you scroll past the video. Scroll back up and it plays again. | `false` |
-
+| `SkipButton` | `false` hides the "Skip the animation" button | `true` |
+| `SkipText` | What the skip button says | `"Skip the animation"` |
 | `StuckFrame` | `true` makes the video the background of the **whole page**. It fills the window the entire time, your page scrolls over it, and scrolling from the top of the page to the bottom plays it start to finish. `ScrollLength` and `StickToLastFrame` don't do anything here; your page's own content decides how long the scroll is. | `false` |
 
 See `scroll-demo.html` for a working example.
@@ -155,9 +156,11 @@ With `StickToLastFrame`, the frame sits *behind* the rest of the page. Sections 
 - `frame.Stage` — the box the video sits in. Put your own things in it (`frame.Stage.append(myLogo)`) and they stay on top of the video while it plays.
 - `frame.Frame` — the frame showing right now. `frame.Progress` — how far through, from 0 to 1.
 - `frame.FrameChanged.Connect(function (n) { ... })` — runs every time the frame changes.
+- `frame.Skip()` — jumps to the end, like pressing the skip button. Every keyframe event on the way still runs (`"Forward"`), and the page scrolls to just after the video. With `StuckFrame` it stays on the last frame until the page is scrolled back to the top.
+- `frame.SkipButton` — the skip button itself. It sits at the bottom middle of the video and fades away once there's nothing left to skip. Style `.webtween-skip` in your own CSS to change its looks or where it sits.
 - `frame.Destroy()` — removes it from the page.
 
-**If the video looks choppy when you scroll:** that's the video file, not the code. Normal videos only store a full picture every few seconds, so jumping around is slow. Re-save it with a full picture on every frame using [ffmpeg](https://ffmpeg.org):
+**If the video still looks choppy when you scroll:** that's the video file, not the code. Normal videos only store a full picture every few seconds, so jumping around is slow. Re-save it with a full picture on every frame using [ffmpeg](https://ffmpeg.org):
 
 ```bash
 ffmpeg -i input.mp4 -an -c:v libx264 -g 1 -crf 23 -movflags faststart output.mp4
@@ -165,6 +168,52 @@ ffmpeg -i input.mp4 -an -c:v libx264 -g 1 -crf 23 -movflags faststart output.mp4
 
 The file gets bigger, but scrolling becomes buttery. (`-an` removes the sound, which isn't used anyway.) For long videos, try `-g 5` instead of `-g 1` for a smaller file.
 
+## Reveal — things fade and rise in as you scroll to them
+
+```js
+new Reveal(".fade-in")
+```
+
+Everything that matches starts invisible and a little lower down. When it scrolls onto the screen, it fades in and rises into place. Things that come into view together go one after another.
+
+| Setting | What it means | Default |
+|---|---|---|
+| `Distance` | How far below its spot it starts, in pixels | `28` |
+| `Time` | How long the fade and rise take, in seconds | `0.9` |
+| `EasingStyle` | How it feels (always `"Out"`, so it slows down as it lands) | `"Quint"` |
+| `Stagger` | Seconds between things that appear at the same time | `0.08` |
+| `Threshold` | How much of it must be on screen before it comes in. `0.5` = half | `0.15` |
+
+**Useful parts:** `reveal.ShowAll()` brings everything in now. `reveal.Elements` is the list it's looking after.
+
+## Parallax — things drift as you scroll
+
+```js
+new Parallax(".photo", { Speed: 0.1 })
+new Parallax(".photo", { Speed: [0.05, 0.12, 0.08] })   // a different speed for each one
+```
+
+`Speed` is how much each thing drifts as the page scrolls: `0.1` moves it a tenth as far as the page, so it seems to float. Negative speeds drift the other way. Everything is exactly in its normal spot when it's in the middle of the screen. `parallax.Destroy()` puts everything back.
+
+## Slideshow — pictures that fade from one to the next
+
+```js
+new Slideshow(["pool.jpg", "lobby.jpg", "room.jpg"], { AspectRatio: "16:9", Parent: "#about" })
+```
+
+The slides can be picture paths (each becomes an ImageCard in the `AspectRatio` you give), ImageCards, or any page elements. They're stacked in one spot, and the first slide decides how big it is.
+
+| Setting | What it means | Default |
+|---|---|---|
+| `Every` | Seconds each slide stays before the next fades in | `6` |
+| `FadeTime` | How long a fade takes, in seconds | `1.6` |
+| `EasingStyle` | How a fade feels | `"Sine"` |
+| `AspectRatio` | The shape, when the slides are picture paths | `1` |
+| `Parent` | Where on the page to put it | not on the page |
+
+**Useful parts:** `slideshow.Next()`, `slideshow.Show(2)` (the first slide is `0`), `slideshow.Current`, `slideshow.Slides`, `slideshow.Destroy()`. It waits while the tab isn't being looked at.
+
+**Reveal, Parallax and Slideshow all move things with the element's CSS `transform` or opacity, like tweens do.** So don't use two of them (or a tween on X, Y, Rotation or Scale) on the same element: put one inside the other. If someone's device asks for less motion, Reveal and Parallax don't move anything and Slideshow stays on its first slide.
 
 ## Card and Carousel — ready-made pieces
 
@@ -183,6 +232,22 @@ You can skip `new Card` and just give the settings: `new Carousel([{ Title: "Cat
 **Card settings** (all optional): `Title`, `Image`, `Description`, `Color`, `TextColor`, `Parent`.
 A card only goes on the page when you give it to a Carousel, or give it a `Parent`.
 
+### ImageCard — just a picture, in the shape you want
+
+```js
+new ImageCard({ Image: "pool.jpg", AspectRatio: "16:9", Title: "The pool", Parent: "#gallery" })
+```
+
+| Setting | What it means | Default |
+|---|---|---|
+| `Image` | The picture | none |
+| `AspectRatio` | Width compared to height. `1` = square, `"16:9"` = wide, `"3:4"` = tall. `"16/9"` or a number like `1.5` work too | `1` |
+| `Width` | How wide it is. The height follows from `AspectRatio` | `240` |
+| `Title` | A caption over the bottom of the picture (also used as its alt text) | none |
+| `Parent` | Where on the page to put it | not on the page |
+
+The picture is cropped to fit the shape, so it never looks stretched. ImageCards can go in a Carousel too, mixed with normal Cards if you like.
+
 **Carousel settings** (all optional)
 
 | Setting | What it means | Default |
@@ -199,7 +264,7 @@ You can change any of them later and it takes effect straight away: `carousel.Du
 
 **Useful parts:** `carousel.Next()`, `carousel.Previous()`, `carousel.Cards`, `carousel.Destroy()`.
 
-**Changing the looks:** style `.webtween-carousel` (the ring) and `.webtween-card` (each card, plus `img`, `h2` and `p` inside it) in your own CSS. Yours wins over WebTween's.
+**Changing the looks:** style `.webtween-carousel` (the ring) and `.webtween-card` (each card, plus `img`, `h2` and `p` inside it) and `.webtween-imagecard` (plus `img` and the caption `span`) in your own CSS. Yours wins over WebTween's.
 
 ## How the files are laid out
 
@@ -210,9 +275,9 @@ src/
   index.js             the starting point: lists what your page gets
   hidden/              the stuff no one needs to see (easing maths, reading styles, the clock...)
   public/
-    animation/         TweenService, TweenInfo, Tween, Enum, Color3, ScrollableFrame
-    elements/          Card: single building blocks
-    buildReferences/   Carousel: things built out of elements + animation
+    animation/         TweenService, TweenInfo, Tween, Enum, Color3, ScrollableFrame, Reveal, Parallax
+    elements/          Card, ImageCard: single building blocks
+    buildReferences/   Carousel, Slideshow: things built out of elements + animation
 ```
 
 Each file says at the top what it uses from other files (`import`), and at the bottom what it lets other files use (`export`). Anything a file doesn't export stays private to that file.

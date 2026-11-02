@@ -8,11 +8,12 @@ import { addStyles, findElement } from "../../hidden/pageStyles.js";
 import { EasingStyle } from "../animation/Enum.js";
 import { TweenService } from "../animation/TweenService.js";
 import { Card, CARD_CSS } from "../elements/Card.js";
+import { ImageCard } from "../elements/ImageCard.js";
 
 /*
   new Carousel([cat, dog, human], { Radius: 300, EasingStyle: "Back" })
 
-  The cards can be Cards, or just their settings: [{ Title: "Cat", Color: "tomato" }, ...]
+  The cards can be Cards, ImageCards, or just Card settings: [{ Title: "Cat", Color: "tomato" }, ...]
   It spins on its own, and with the scroll wheel while your mouse is over it.
   You can change any setting later and it takes effect straight away:
       carousel.Duration = 0.5
@@ -38,7 +39,7 @@ function Carousel(cards, settings) {
   this.Instance = document.createElement("div");
   this.Instance.className = "webtween-carousel";
   this.Cards = cards.map(function (card) {
-    return card instanceof Card ? card : new Card(card);
+    return card instanceof Card || card instanceof ImageCard ? card : new Card(card);
   });
   var ring = this.Instance;
   this.Cards.forEach(function (card) {
@@ -104,12 +105,13 @@ Carousel.prototype._everyFrame = function (now) {
   var eased = TweenService.GetValue(alpha, this.EasingStyle, "Out");
   this._spin = this._from + (this._to - this._from) * eased;
 
-  // turn each card to its spot, then push it out from the middle
+  // centre each card, turn it to its spot, then push it out from the middle
   var step = this._step(),
     spin = this._spin,
     radius = this.Radius;
   this.Cards.forEach(function (card, i) {
-    card.Instance.style.transform = "rotateY(" + round(spin + i * step) + "deg) translateZ(" + radius + "px)";
+    card.Instance.style.transform =
+      "translate(-50%, -50%) rotateY(" + round(spin + i * step) + "deg) translateZ(" + radius + "px)";
   });
 };
 
@@ -145,9 +147,9 @@ var CAROUSEL_CSS = [
   "  perspective: 1000px; /* how strong the 3D looks: smaller = more dramatic */",
   "  transform-style: preserve-3d; /* lets the browser work out which card is in front */",
   "}",
-  ".webtween-carousel .webtween-card {",
-  "  position: absolute; left: 50%; top: 50%;",
-  "  margin: -110px 0 0 -80px; /* half the card's size, so it's centred */",
+  "/* div.: beats each card's own .webtween-... styles, whichever got added first */",
+  "div.webtween-carousel > * {",
+  "  position: absolute; left: 50%; top: 50%; /* centred by the spin, whatever size the card is */",
   "}",
 ].join("\n");
 

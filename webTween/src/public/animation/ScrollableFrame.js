@@ -4,6 +4,7 @@
 
 import { oops } from "../../hidden/helpers.js";
 import { Signal } from "../../hidden/signal.js";
+import { addStyles } from "../../hidden/pageStyles.js";
 
 /*
   new ScrollableFrame("intro.mp4", [flyIn, showText], [5, 40], { FrameRate: 30 })
@@ -100,6 +101,19 @@ function ScrollableFrame(src, keyframeEvents, keyframeTriggers, options) {
   this.Stage = stage; // put your own things in here and they'll sit on top of the video
   this.Video = video;
 
+  // A "skip the animation" button, so nobody has to scroll through the whole thing.
+  this._skipped = false;
+  if (options.SkipButton !== false) {
+    addStyles("ScrollableFrame", SKIP_CSS);
+    var skip = document.createElement("button");
+    skip.type = "button";
+    skip.className = "webtween-skip";
+    skip.textContent = options.SkipText || "Skip the animation";
+    skip.addEventListener("click", this.Skip.bind(this));
+    stage.appendChild(skip);
+    this.SkipButton = skip;
+  }
+
   // A screen-sized box pinned behind the whole page. When you scroll past the end,
   // the video moves in here so its last frame becomes the background.
   this._stuck = false;
@@ -154,6 +168,13 @@ ScrollableFrame.prototype._tick = function () {
   // Scrolled past the end? Then the video becomes the page's background (and goes back if you scroll up).
   if (this._backdrop) this._setStuck(distance > 0 && scrolled >= distance);
 
+  // After Skip() with StuckFrame, stay on the last frame until they scroll back to the top.
+  if (this._skipped && this.Progress === 0) this._skipped = false;
+  if (this._skipped) this.Progress = 1;
+
+  // The skip button goes away once there's nothing left to skip.
+  if (this.SkipButton) this.SkipButton.classList.toggle("webtween-skip-done", this.Progress >= 0.999);
+
   // Glide the video toward where the scroll says it should be.
   var targetTime = this.Progress * video.duration;
   this._shownTime += (targetTime - this._shownTime) * this.Smoothness;
@@ -202,6 +223,22 @@ function safeCall(fn, direction) {
   }
 }
 
+/**
+  Skip to the end: jump straight to the last frame (every keyframe event on the way
+  still runs, "Forward"), and scroll the page to just after the video.
+  With StuckFrame there's nothing to scroll past, so it stays on the last frame until
+  the page is scrolled back to the top.
+*/
+ScrollableFrame.prototype.Skip = function () {
+  if (this.StuckFrame) {
+    this._skipped = true;
+  } else {
+    var after = window.scrollY + this.Instance.getBoundingClientRect().bottom;
+    window.scrollTo({ top: after, behavior: "instant" }); // instant: a smooth scroll would play it all anyway
+  }
+  if (this.Video.duration) this._shownTime = this.Video.duration;
+};
+
 /** Remove it from the page and stop watching the scroll. */
 ScrollableFrame.prototype.Destroy = function () {
   cancelAnimationFrame(this._frameRequest);
@@ -210,6 +247,22 @@ ScrollableFrame.prototype.Destroy = function () {
   if (this._backdrop) this._backdrop.remove();
 };
 ScrollableFrame.prototype.destroy = ScrollableFrame.prototype.Destroy;
+ScrollableFrame.prototype.skip = ScrollableFrame.prototype.Skip;
+
+// The skip button's default looks. Style .webtween-skip in your own CSS to change them.
+var SKIP_CSS = [
+  ".webtween-skip {",
+  "  position: absolute; left: 50%; bottom: 24px; z-index: 2; /* above anything else you put on the video */",
+  "  transform: translateX(-50%);",
+  "  min-height: 44px; padding: 0 18px; border: 0; border-radius: 0;",
+  "  background: rgba(0, 0, 0, 0.55); color: #fff;",
+  "  font: 500 14px/1 system-ui, sans-serif; cursor: pointer;",
+  "  transition: opacity 0.4s, visibility 0.4s, background-color 0.2s;",
+  "}",
+  ".webtween-skip:hover { background: rgba(0, 0, 0, 0.8); }",
+  ".webtween-skip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }",
+  ".webtween-skip.webtween-skip-done { opacity: 0; visibility: hidden; pointer-events: none; }",
+].join("\n");
 ScrollableFrame["new"] = function (a, b, c, d) {
   return new ScrollableFrame(a, b, c, d);
 };
