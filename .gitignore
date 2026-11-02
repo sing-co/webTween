@@ -18,3 +18,8 @@
 !/webTween/timeline-demo.html
 !/webTween/components-demo.html
 !/webTween/demo-assets/
+!/webTween/media/
+
+# The website (GitHub Pages)
+!/index.html
+!/.nojekyll

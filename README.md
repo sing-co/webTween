@@ -3,6 +3,17 @@
 Smooth animations for websites that work like Roblox's **TweenService**.
 If you've made a tween in Roblox, you already know how to use this.
 
+### [Try it live →](https://sing-co.github.io/webTween/)
+
+<p align="center"><img src="webTween/media/scroll-video.gif" width="640" alt="A hotel website where a video plays as you scroll, then the page fades in"></p>
+
+| | |
+|---|---|
+| <img src="webTween/media/launch.gif" alt="A heading rising in word by word, numbers counting up, a countdown"> | <img src="webTween/media/product.gif" alt="A drink can turned round by dragging, then a hotspot card opening"> |
+| **[A product launch](https://sing-co.github.io/webTween/webTween/components-demo.html#launch)** · TextReveal, Countdown, CountUp, Marquee | **[A product page](https://sing-co.github.io/webTween/webTween/components-demo.html#product)** · Spin360, Hotspots, CompareSlider |
+| <img src="webTween/media/restaurant.gif" alt="Menu tabs switching, then a photo growing to fill the screen"> | <img src="webTween/media/timeline.gif" alt="Shapes and words animating in order, with a timeline panel scrubbed back"> |
+| **[A restaurant](https://sing-co.github.io/webTween/webTween/components-demo.html#restaurant)** · Tabs, OpeningHours, Lightbox | **[Timeline](https://sing-co.github.io/webTween/webTween/timeline-demo.html)** · play, slow down and scrub through animations |
+
 **What's in it**
 
 - **Tweens:** `TweenService`, `TweenInfo`, `Color3` and `Enum`, working like Roblox's
@@ -13,8 +24,6 @@ If you've made a tween in Roblox, you already know how to use this.
 - **Page pieces:** `Tabs`, `Accordion`, `Marquee`, `Countdown`, `OpeningHours`, `AddToCalendar`, `Card`
 
 [Which pieces to use for a product launch, a product page, a restaurant, an event or a hotel](#building-a-whole-page-which-pieces-to-use).
-
-**Try it:** open [`webTween/components-demo.html`](webTween/components-demo.html) or [`webTween/timeline-demo.html`](webTween/timeline-demo.html) with a local server (see [If the video looks choppy](#scrollableframe--a-video-that-plays-as-you-scroll) for which ones work).
 
 ## Getting started
 
