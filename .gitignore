@@ -13,3 +13,6 @@
 !/webTween/package-lock.json
 !/webTween/README.md
 !/webTween/webtween.js
+
+# Demos
+!/webTween/timeline-demo.html

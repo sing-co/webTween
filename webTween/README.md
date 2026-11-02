@@ -110,6 +110,57 @@ async function sequence() {
 `Connect` gives you back a connection — call `.Disconnect()` on it to stop listening.
 `Once(...)` listens for just the next time.
 
+## Timeline — line lots of things up
+
+For more than two or three steps, a Timeline is easier than waiting for each tween. Make the tweens (don't `Play()` them), then schedule them:
+
+```js
+const intro = new Timeline({ Name: "Intro" })      // Timeline.new(...) works too
+
+intro.Schedule(titleIn)                    // starts at 0
+intro.Schedule(photoIn, "+0.2")            // 0.2s after the previous one ends
+intro.Schedule(buttonPop, "with")          // at the same time as the previous one
+intro.Schedule(sayHi, 2.5)                 // a function, run exactly 2.5s in
+intro.Schedule(otherTimeline)              // timelines can go inside timelines
+
+intro.Play()
+```
+
+**What you can schedule:** a tween from `TweenService.Create(...)`, a function, or another Timeline.
+
+**When it starts** (the second thing you give `Schedule`, optional):
+
+| You write | It starts |
+|---|---|
+| nothing | right after the previous thing ends |
+| `1.5` | exactly 1.5 seconds from the start |
+| `"+0.2"` | 0.2 seconds after the previous thing ends |
+| `"-0.2"` | 0.2 seconds *before* the previous thing ends, so they overlap |
+| `"with"` | at the same moment as the previous thing |
+
+The third thing is an optional name, shown by `DisplayTimeline`: `intro.Schedule(titleIn, 0, "Title in")`. Things you don't name get one made up, like `#title: Y, opacity`.
+
+Functions are told `"Forward"` or `"Backward"` (like ScrollableFrame's keyframe events), because a timeline can be scrubbed or jumped back past them.
+
+**Settings** (all optional): `new Timeline({ Name, RepeatCount, Reverses, Speed })`. `RepeatCount` and `Reverses` work like TweenInfo's. `Speed` is `1` for normal, `0.5` for half speed, and can be changed while it plays.
+
+| Do this | What happens |
+|---|---|
+| `intro.Play()` | Plays from where it is (from the start if it's finished) |
+| `intro.Pause()` | Freezes it |
+| `intro.Restart()` | Back to the start, and plays |
+| `intro.Seek(1.5)` | Jumps to 1.5 seconds in, playing or not |
+| `intro.Duration` | How long one play takes, in seconds |
+| `intro.Completed.Connect(fn)` | Runs when it finishes |
+| `intro.GetSchedule()` | A list of everything, with `Name`, `Kind`, `Starts`, `Ends` and `Length` |
+
+### Seeing your timeline
+
+- `intro.DisplayTimeline(false)` prints a table in the browser's console: every scheduled thing, when it starts and ends.
+- `intro.DisplayTimeline(true)` opens a panel along the bottom of the page: a bar for each thing, play and pause, slow motion, and a red playhead. **Drag across the bars to scrub through your real page**, frame by frame. Hover a bar for its exact times. It doesn't change your code: when you've found the right timing, change the numbers in your `Schedule` calls.
+
+Each tween starts from wherever things are the moment the timeline reaches it, so two tweens in a row on the same thing carry on from each other. A tween in a timeline belongs to that timeline: don't also `Play()` it on its own.
+
 ## Extra tools
 
 - `TweenService.GetValue(0.5, "Quad", "Out")` — the eased value at a point (0 to 1), without animating anything.
@@ -275,7 +326,7 @@ src/
   index.js             the starting point: lists what your page gets
   hidden/              the stuff no one needs to see (easing maths, reading styles, the clock...)
   public/
-    animation/         TweenService, TweenInfo, Tween, Enum, Color3, ScrollableFrame, Reveal, Parallax
+    animation/         TweenService, TweenInfo, Tween, Timeline, Enum, Color3, ScrollableFrame, Reveal, Parallax
     elements/          Card, ImageCard: single building blocks
     buildReferences/   Carousel, Slideshow: things built out of elements + animation
 ```

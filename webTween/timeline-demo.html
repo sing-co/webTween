@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline Demo · WebTween</title>
+<style>
+  :root {
+    --bg: #f1f0eb;
+    --ink: #161615;
+    --muted: #55544e;
+    --stage: #121214;
+    --yellow: #f2c230;
+    --blue: #4f7cf0;
+    --red: #e9573f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 64px 24px 96px; }
+
+  .intro { display: grid; grid-template-columns: 1fr 1.6fr; gap: 48px; align-items: center; }
+  h1 { margin: 0 0 16px; font-size: clamp(36px, 5vw, 64px); line-height: 0.98; letter-spacing: -0.03em; }
+  .intro p { margin: 0 0 24px; max-width: 36ch; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    min-height: 44px; padding: 0 18px; border: 0; border-radius: 0;
+    background: var(--ink); color: var(--bg); font: 600 15px system-ui, sans-serif; cursor: pointer;
+  }
+  button.quiet { background: transparent; color: var(--ink); text-decoration: underline; text-underline-offset: 0.25em; }
+  button:active { transform: scale(0.97); }
+  button:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+
+  /* the stage the timeline animates */
+  .stage {
+    position: relative; aspect-ratio: 16 / 10; overflow: hidden;
+    background: var(--stage); color: #f1f0eb;
+  }
+  .sun { position: absolute; left: 62%; top: 14%; width: 26%; aspect-ratio: 1; border-radius: 50%; background: var(--yellow); }
+  .bar { position: absolute; left: 0; bottom: 18%; width: 72%; height: 9%; background: var(--blue); }
+  .block { position: absolute; right: 8%; bottom: 18%; width: 14%; aspect-ratio: 1; background: var(--red); }
+  .words { position: absolute; left: 7%; top: 16%; margin: 0; font-size: clamp(28px, 5.4vw, 64px); font-weight: 800; line-height: 1; letter-spacing: -0.03em; }
+  .words span { display: inline-block; }
+  .caption { position: absolute; left: 7%; bottom: 6%; margin: 0; font-size: 15px; color: #b9b8b2; }
+
+  h2 { margin: 96px 0 16px; font-size: 28px; letter-spacing: -0.02em; }
+  pre { margin: 0; padding: 24px; overflow: auto; background: #e4e3dd; font: 14px/1.6 ui-monospace, Consolas, monospace; }
+
+  @media (max-width: 800px) {
+    .intro { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="intro">
+    <div>
+      <h1>Line it all up</h1>
+      <p>Seven tweens, two functions and a timeline inside a timeline, all scheduled on one Timeline. Drag across the bars in the panel at the bottom to scrub through it.</p>
+      <div class="buttons">
+        <button type="button" id="play">Play</button>
+        <button type="button" id="restart">Restart</button>
+        <button type="button" class="quiet" id="log">Print it in the console</button>
+      </div>
+    </div>
+
+    <div class="stage" aria-label="Animated scene">
+      <div class="sun" id="sun"></div>
+      <div class="bar" id="bar"></div>
+      <div class="block" id="block"></div>
+      <p class="words"><span id="w1">Line</span> <span id="w2">it</span><br><span id="w3">all</span> <span id="w4">up.</span></p>
+      <p class="caption" id="caption">Press Play</p>
+    </div>
+  </section>
+
+  <h2>The code</h2>
+  <pre id="code"></pre>
+</main>
+
+<script src="webtween.js"></script>
+<script id="demo">
+// Shortcut for making a tween (they're not played: the timeline plays them)
+const tween = (thing, time, style, goals) => TweenService.Create(thing, new TweenInfo(time, style, "Out"), goals)
+
+// Where everything starts: off to the side, invisible
+TweenService.Create("#sun", new TweenInfo(0), { Scale: 0 }).Play()
+TweenService.Create("#bar", new TweenInfo(0), { X: "-100%" }).Play()
+TweenService.Create("#block", new TweenInfo(0), { Y: 160, Rotation: -90 }).Play()
+for (const id of ["#w1", "#w2", "#w3", "#w4"]) {
+  TweenService.Create(id, new TweenInfo(0), { Y: 40, Transparency: 1 }).Play()
+}
+
+// Functions are told "Forward" or "Backward", so they can undo themselves when you scrub back
+function say(text, before) {
+  return function (direction) {
+    document.getElementById("caption").textContent = direction === "Forward" ? text : before
+  }
+}
+
+// A small timeline of its own: the sun pulses twice
+const pulse = Timeline.new({ Name: "Sun pulse", RepeatCount: 1 })
+pulse.Schedule(TweenService.Create("#sun", new TweenInfo(0.35, "Sine", "InOut", 0, true), { Scale: 1.12 }))
+
+// The main timeline
+const intro = new Timeline({ Name: "Intro" })
+intro
+  .Schedule(say("The bar slides in", "Press Play"), 0, "Caption: bar")
+  .Schedule(tween("#bar", 0.9, "Quint", { X: "0%" }), 0, "Bar slides in")
+  .Schedule(tween("#sun", 0.8, "Back", { Scale: 1 }), "-0.4", "Sun pops up")
+  .Schedule(tween("#block", 0.7, "Back", { Y: 0, Rotation: 0 }), "with", "Block flips in")
+  .Schedule(say("Then the words, one after another", "The bar slides in"), "+0.1", "Caption: words")
+  .Schedule(tween("#w1", 0.6, "Quint", { Y: 0, Transparency: 0 }), "with", "Word: Line")
+  .Schedule(tween("#w2", 0.6, "Quint", { Y: 0, Transparency: 0 }), "-0.5", "Word: it")
+  .Schedule(tween("#w3", 0.6, "Quint", { Y: 0, Transparency: 0 }), "-0.5", "Word: all")
+  .Schedule(tween("#w4", 0.6, "Quint", { Y: 0, Transparency: 0 }), "-0.5", "Word: up.")
+  .Schedule(pulse, "+0.1")
+
+// The buttons
+document.getElementById("play").onclick = () => (intro.PlaybackState === "Playing" ? intro.Pause() : intro.Play())
+document.getElementById("restart").onclick = () => intro.Restart()
+document.getElementById("log").onclick = () => intro.DisplayTimeline(false)
+intro.Completed.Connect(() => console.log("Intro finished"))
+
+// The panel along the bottom of the page
+intro.DisplayTimeline(true)
+</script>
+<script>
+  // show this page's own code under the stage
+  document.getElementById("code").textContent = document.getElementById("demo").textContent.trim()
+  setInterval(() => {
+    document.getElementById("play").textContent = intro.PlaybackState === "Playing" ? "Pause" : "Play"
+  }, 100)
+</script>
+</body>
+</html>

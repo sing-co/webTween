@@ -8,6 +8,7 @@
 import { TweenService } from "./public/animation/TweenService.js";
 import { TweenInfo } from "./public/animation/TweenInfo.js";
 import { Tween } from "./public/animation/Tween.js";
+import { Timeline } from "./public/animation/Timeline.js";
 import { Enum } from "./public/animation/Enum.js";
 import { Color3 } from "./public/animation/Color3.js";
 import { ScrollableFrame } from "./public/animation/ScrollableFrame.js";
@@ -25,6 +26,7 @@ var WebTween = {
   Enum: Enum,
   Color3: Color3,
   Tween: Tween,
+  Timeline: Timeline,
   ScrollableFrame: ScrollableFrame,
   Reveal: Reveal,
   Parallax: Parallax,
@@ -38,7 +40,7 @@ var WebTween = {
 
 window.WebTween = WebTween;
 [
-  "TweenService", "TweenInfo", "Enum", "Color3", "ScrollableFrame", "Reveal", "Parallax",
+  "TweenService", "TweenInfo", "Enum", "Color3", "Timeline", "ScrollableFrame", "Reveal", "Parallax",
   "Card", "ImageCard", "Carousel", "Slideshow",
 ].forEach(function (name) {
   if (window[name] === undefined) window[name] = WebTween[name];

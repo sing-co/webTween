@@ -503,23 +503,57 @@
     });
     if (moved) writeMove(el, m.move);
   };
-  Tween.prototype._step = function(now) {
+  Tween.prototype._totalTime = function() {
     var info = this.TweenInfo;
-    var elapsed = this._elapsed = Math.max(0, now - this._startTime) / 1e3;
+    if (info.RepeatCount < 0) return Infinity;
+    return (info.DelayTime + info.Time * (info.Reverses ? 2 : 1)) * (info.RepeatCount + 1);
+  };
+  Tween.prototype._progressAt = function(elapsed) {
+    var info = this.TweenInfo;
     var oneCycle = info.DelayTime + info.Time * (info.Reverses ? 2 : 1);
     var cycles = info.RepeatCount < 0 ? Infinity : info.RepeatCount + 1;
     var cycle = oneCycle > 0 ? Math.floor(elapsed / oneCycle) : Infinity;
-    if (cycle >= cycles) return this._finish();
+    if (cycle >= cycles) return null;
     var inCycle = elapsed - cycle * oneCycle;
-    if (inCycle < info.DelayTime) {
-      this.PlaybackState = PlaybackState.Delayed;
-      if (cycle > 0) this._apply(0);
-      return;
-    }
-    this.PlaybackState = PlaybackState.Playing;
+    if (inCycle < info.DelayTime) return { state: PlaybackState.Delayed, alpha: 0, repeating: cycle > 0 };
     var progress = info.Time > 0 ? (inCycle - info.DelayTime) / info.Time : 1;
     if (info.Reverses && progress > 1) progress = 2 - progress;
-    this._apply(ease(progress, info.EasingStyle, info.EasingDirection));
+    return { state: PlaybackState.Playing, alpha: ease(progress, info.EasingStyle, info.EasingDirection) };
+  };
+  Tween.prototype._step = function(now) {
+    var elapsed = this._elapsed = Math.max(0, now - this._startTime) / 1e3;
+    var at = this._progressAt(elapsed);
+    if (!at) return this._finish();
+    this.PlaybackState = at.state;
+    if (at.state === PlaybackState.Delayed) {
+      if (at.repeating) this._apply(0);
+      return;
+    }
+    this._apply(at.alpha);
+  };
+  Tween.prototype._renderAt = function(t) {
+    if (!this._captured) {
+      if (t < 0) return;
+      this._capture();
+      this._captured = true;
+    }
+    if (!this._held) {
+      this._hold();
+      this._held = true;
+    }
+    var at = t < 0 ? { state: PlaybackState.Begin, alpha: 0 } : this._progressAt(t);
+    if (!at) {
+      this._applyEnd(this.TweenInfo.Reverses);
+      this.PlaybackState = PlaybackState.Completed;
+      return;
+    }
+    this.PlaybackState = at.state;
+    this._apply(at.alpha);
+  };
+  Tween.prototype._letGo = function() {
+    if (!this._held) return;
+    this._held = false;
+    this._release();
   };
   Tween.prototype._finish = function() {
     playing.delete(this);
@@ -609,19 +643,6 @@
   };
   TweenService.create = TweenService.Create;
 
-  // src/public/animation/Color3.js
-  var Color3 = {
-    fromRGB: function(r, g, b) {
-      return "rgb(" + r + ", " + g + ", " + b + ")";
-    },
-    new: function(r, g, b) {
-      return "rgb(" + r * 255 + ", " + g * 255 + ", " + b * 255 + ")";
-    },
-    fromHex: function(hex) {
-      return hex.charAt(0) === "#" ? hex : "#" + hex;
-    }
-  };
-
   // src/hidden/pageStyles.js
   var addedStyles = {};
   function addStyles(name, css) {
@@ -639,6 +660,386 @@
     if (!found) throw oops(`Couldn't find anything on the page matching "` + thing + '" to put the ' + what + " in.");
     return found;
   }
+
+  // src/hidden/timelinePanel.js
+  function seconds(n) {
+    return n.toFixed(2) + "s";
+  }
+  function logTimeline(timeline) {
+    console.log('WebTween: timeline "' + timeline.Name + '" lasts ' + seconds(timeline.Duration));
+    console.table(
+      timeline.GetSchedule().map(function(row) {
+        return { Name: row.Name, Kind: row.Kind, Starts: seconds(row.Starts), Ends: seconds(row.Ends), Length: seconds(row.Length) };
+      })
+    );
+  }
+  var openPanel = null;
+  function showTimelinePanel(timeline) {
+    if (openPanel) openPanel.close();
+    addStyles("TimelinePanel", PANEL_CSS);
+    var rows = timeline.GetSchedule();
+    var duration = Math.max(timeline.Duration, 1e-3);
+    var panel = make("section", "webtween-timeline");
+    panel.setAttribute("aria-label", "Timeline: " + timeline.Name);
+    var top = make("div", "wtl-top", panel);
+    make("strong", "wtl-name", top).textContent = timeline.Name;
+    var playButton = button("Play", top);
+    var restartButton = button("Restart", top);
+    var speedLabel = make("label", "wtl-speed", top);
+    speedLabel.textContent = "Speed ";
+    var speed = make("select", "", speedLabel);
+    [0.1, 0.25, 0.5, 1, 2].forEach(function(s) {
+      var option = make("option", "", speed);
+      option.value = s;
+      option.textContent = s + "\xD7";
+      if (s === timeline.Speed) option.selected = true;
+    });
+    var clock = make("span", "wtl-clock", top);
+    var closeButton = button("Close", top);
+    closeButton.classList.add("wtl-close");
+    var body = make("div", "wtl-body", panel);
+    var names = make("div", "wtl-names", body);
+    make("div", "wtl-ruler-space", names);
+    var lanes = make("div", "wtl-lanes", body);
+    var track = make("div", "wtl-track", lanes);
+    var ruler = make("div", "wtl-ruler", track);
+    var step = duration <= 2 ? 0.25 : duration <= 5 ? 0.5 : duration <= 12 ? 1 : duration <= 30 ? 2 : 5;
+    for (var t = 0; t <= duration + 1e-4; t += step) {
+      var tick = make("span", "wtl-tick", ruler);
+      tick.style.left = t / duration * 100 + "%";
+      tick.textContent = +t.toFixed(2) + "s";
+    }
+    rows.forEach(function(row) {
+      var name = make("div", "wtl-row-name", names);
+      name.textContent = row.Name;
+      name.title = row.Name;
+      var lane = make("div", "wtl-lane", track);
+      var mark = make("div", row.Kind === "function" ? "wtl-mark" : "wtl-span wtl-" + row.Kind, lane);
+      mark.style.left = row.Starts / duration * 100 + "%";
+      if (row.Kind !== "function") mark.style.width = row.Length / duration * 100 + "%";
+      mark.title = row.Name + "\n" + (row.Kind === "function" ? "Runs at " + seconds(row.Starts) : "Starts " + seconds(row.Starts) + " \xB7 ends " + seconds(row.Ends) + " \xB7 lasts " + seconds(row.Length));
+    });
+    var playhead = make("div", "wtl-playhead", track);
+    playButton.addEventListener("click", function() {
+      if (timeline.PlaybackState === "Playing") timeline.Pause();
+      else timeline.Play();
+    });
+    restartButton.addEventListener("click", function() {
+      timeline.Restart();
+    });
+    speed.addEventListener("change", function() {
+      timeline.Speed = Number(speed.value);
+    });
+    function scrubTo(e) {
+      var box = track.getBoundingClientRect();
+      var fraction = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+      timeline.Seek(fraction * timeline.Duration + timeline._cycle * timeline.Duration * (timeline.Reverses ? 2 : 1));
+    }
+    var dragging = false;
+    lanes.addEventListener("pointerdown", function(e) {
+      dragging = true;
+      timeline.Pause();
+      try {
+        lanes.setPointerCapture(e.pointerId);
+      } catch (err) {
+      }
+      lanes.classList.add("wtl-scrubbing");
+      scrubTo(e);
+    });
+    lanes.addEventListener("pointermove", function(e) {
+      if (dragging) scrubTo(e);
+    });
+    function stopDragging() {
+      dragging = false;
+      lanes.classList.remove("wtl-scrubbing");
+    }
+    lanes.addEventListener("pointerup", stopDragging);
+    lanes.addEventListener("pointercancel", stopDragging);
+    var frameRequest2;
+    function update() {
+      var local = Math.max(0, timeline._local);
+      playhead.style.left = local / duration * 100 + "%";
+      clock.textContent = seconds(local) + " / " + seconds(timeline.Duration);
+      playButton.textContent = timeline.PlaybackState === "Playing" ? "Pause" : "Play";
+      frameRequest2 = requestAnimationFrame(update);
+    }
+    update();
+    document.body.appendChild(panel);
+    var savedPadding = document.body.style.paddingBottom;
+    document.body.style.paddingBottom = panel.offsetHeight + "px";
+    var handle = {
+      close: function() {
+        cancelAnimationFrame(frameRequest2);
+        panel.remove();
+        document.body.style.paddingBottom = savedPadding;
+        if (openPanel === handle) openPanel = null;
+        timeline._panel = null;
+      }
+    };
+    closeButton.addEventListener("click", handle.close);
+    openPanel = timeline._panel = handle;
+    return handle;
+  }
+  function make(tag, className, parent) {
+    var el = document.createElement(tag);
+    if (className) el.className = className;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  function button(text, parent) {
+    var b = make("button", "wtl-button", parent);
+    b.type = "button";
+    b.textContent = text;
+    return b;
+  }
+  var PANEL_CSS = [
+    ".webtween-timeline {",
+    "  position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483000;",
+    "  max-height: 45vh; display: flex; flex-direction: column;",
+    "  background: #141416; color: #e9e9e4; font: 13px/1.4 system-ui, sans-serif; text-align: left;",
+    "  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35); /* it floats over the page */",
+    "}",
+    ".webtween-timeline * { box-sizing: border-box; }",
+    ".wtl-top { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #1e1e22; }",
+    ".wtl-name { margin-right: 8px; font-weight: 600; }",
+    ".wtl-button, .wtl-speed select {",
+    "  height: 30px; padding: 0 12px; border: 0; border-radius: 6px;",
+    "  background: #2c2c33; color: inherit; font: inherit; cursor: pointer;",
+    "}",
+    ".wtl-button:hover, .wtl-speed select:hover { background: #393941; }",
+    ".wtl-button:focus-visible, .wtl-speed select:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }",
+    ".wtl-speed { color: #a9a9a2; }",
+    ".wtl-speed select { padding: 0 8px; }",
+    ".wtl-clock { font-variant-numeric: tabular-nums; color: #a9a9a2; }",
+    ".wtl-close { margin-left: auto; }",
+    ".wtl-body { display: flex; overflow: auto; }",
+    ".wtl-names { flex: 0 0 200px; }",
+    ".wtl-ruler-space, .wtl-ruler { height: 26px; }",
+    ".wtl-row-name, .wtl-lane { height: 30px; }",
+    ".wtl-row-name { padding: 0 12px; line-height: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }",
+    ".wtl-names > :nth-child(even), .wtl-track > .wtl-lane:nth-child(even) { background: #1a1a1d; }",
+    ".wtl-lanes { flex: 1; min-width: 320px; padding: 0 20px; cursor: ew-resize; touch-action: none; user-select: none; }",
+    ".wtl-track { position: relative; }",
+    ".wtl-ruler { position: relative; color: #8d8d87; font-size: 11px; }",
+    ".wtl-tick { position: absolute; top: 6px; transform: translateX(-50%); }",
+    ".wtl-lane { position: relative; }",
+    ".wtl-span { position: absolute; top: 7px; height: 16px; min-width: 3px; border-radius: 4px; background: #5b8def; }",
+    ".wtl-timeline { background: #3fa796; }",
+    ".wtl-mark {",
+    "  position: absolute; top: 9px; width: 12px; height: 12px; margin-left: -6px;",
+    "  border-radius: 2px; background: #f0a35b; transform: rotate(45deg);",
+    "}",
+    ".wtl-span:hover, .wtl-mark:hover { filter: brightness(1.25); }",
+    ".wtl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #ff5c5c; pointer-events: none; }",
+    ".wtl-scrubbing .wtl-playhead { width: 3px; }"
+  ].join("\n");
+
+  // src/public/animation/Timeline.js
+  function Timeline(settings) {
+    if (!(this instanceof Timeline)) return new Timeline(settings);
+    settings = settings || {};
+    this.Name = settings.Name || "Timeline";
+    this.RepeatCount = settings.RepeatCount === void 0 ? 0 : settings.RepeatCount;
+    this.Reverses = !!settings.Reverses;
+    this.Speed = settings.Speed === void 0 ? 1 : settings.Speed;
+    this.PlaybackState = PlaybackState.Begin;
+    this.Completed = new Signal();
+    this.Time = 0;
+    this._items = [];
+    this._local = 0;
+    this._cycle = 0;
+    this._prevStart = 0;
+    this._prevEnd = 0;
+    this._tick = this._tick.bind(this);
+  }
+  Object.defineProperty(Timeline.prototype, "Duration", {
+    get: function() {
+      return this._items.reduce(function(most, item) {
+        return Math.max(most, item.start + lengthOf(item));
+      }, 0);
+    }
+  });
+  function lengthOf(item) {
+    return item.kind === "function" ? 0 : item.thing._totalTime();
+  }
+  Timeline.prototype._totalTime = function() {
+    if (this.RepeatCount < 0) return Infinity;
+    return this.Duration * (this.Reverses ? 2 : 1) * (this.RepeatCount + 1);
+  };
+  Timeline.prototype.Schedule = function(thing, at, name) {
+    var kind = thing instanceof Tween ? "tween" : thing instanceof Timeline ? "timeline" : typeof thing === "function" ? "function" : null;
+    if (!kind) {
+      throw oops("Schedule needs a tween (from TweenService.Create), a function, or another Timeline.");
+    }
+    if (thing === this) throw oops("A timeline can't be scheduled inside itself.");
+    if (kind !== "function" && thing._totalTime() === Infinity) {
+      throw oops(
+        "Something that repeats forever (RepeatCount -1) can't go in a timeline, because it never ends. Give it a RepeatCount, or set RepeatCount on the Timeline instead."
+      );
+    }
+    var item = { kind, thing, start: this._whereToStart(at), name: name || nameOf(kind, thing) };
+    this._items.push(item);
+    this._prevStart = item.start;
+    this._prevEnd = item.start + lengthOf(item);
+    return this;
+  };
+  Timeline.prototype._whereToStart = function(at) {
+    if (at === void 0 || at === null) return this._prevEnd;
+    if (typeof at === "number" && at >= 0) return at;
+    if (at === "with") return this._prevStart;
+    if (typeof at === "string" && /^[+-]\s*\d*\.?\d+$/.test(at)) {
+      return Math.max(0, this._prevEnd + parseFloat(at.replace(/\s/g, "")));
+    }
+    throw oops('"' + at + `" isn't a start time. Use a number of seconds like 1.5, or "+0.2", "-0.2" or "with".`);
+  };
+  function nameOf(kind, thing) {
+    if (kind === "timeline") return thing.Name;
+    if (kind === "function") return thing.name ? thing.name + "()" : "function";
+    var el = thing.Instance;
+    var who = el.id ? "#" + el.id : el.classList.length ? "." + el.classList[0] : el.tagName.toLowerCase();
+    var what = thing._goals.map(function(goal) {
+      return goal.key || goal.cssName;
+    });
+    return who + ": " + what.join(", ");
+  }
+  Timeline.prototype.GetSchedule = function() {
+    return this._items.map(function(item) {
+      var length = lengthOf(item);
+      return { Name: item.name, Kind: item.kind, Starts: item.start, Ends: item.start + length, Length: length };
+    });
+  };
+  Timeline.prototype._render = function(t, quiet) {
+    var forward = t >= this._local;
+    this._local = t;
+    var items = this._items.slice().sort(function(a, b) {
+      return a.start - b.start;
+    });
+    if (!forward) items.reverse();
+    items.forEach(function(item) {
+      var length = lengthOf(item);
+      var inside = t - item.start;
+      if (item.kind === "function") {
+        if (!item.ran && inside >= 0) {
+          item.ran = true;
+          if (!quiet) safeCall(item.thing, "Forward");
+        } else if (item.ran && inside < 0) {
+          item.ran = false;
+          if (!quiet) safeCall(item.thing, "Backward");
+        }
+        return;
+      }
+      var clamped = inside < 0 ? -1 : Math.min(inside, length);
+      if (clamped === item.shownAt) return;
+      item.shownAt = clamped;
+      if (item.kind === "tween") item.thing._renderAt(clamped);
+      else item.thing._renderTotal(clamped, quiet);
+      var finished = inside >= length;
+      if (finished && !item.done) {
+        item.done = true;
+        if (!quiet && item.kind === "tween") item.thing.Completed._fire(PlaybackState.Completed);
+      } else if (!finished) {
+        item.done = false;
+      }
+    });
+  };
+  Timeline.prototype._renderTotal = function(T, quiet) {
+    var one = this.Duration;
+    if (T < 0 || one === 0) return this._render(T < 0 ? -1 : 0, quiet);
+    var perCycle = one * (this.Reverses ? 2 : 1);
+    var cycles = this.RepeatCount < 0 ? Infinity : this.RepeatCount + 1;
+    var cycle = Math.min(Math.floor(T / perCycle), cycles - 1);
+    var inCycle = Math.min(T - cycle * perCycle, perCycle);
+    var local = inCycle > one ? perCycle - inCycle : inCycle;
+    if (!this.Reverses && cycle !== this._cycle) {
+      this._render(cycle > this._cycle ? one : 0, quiet);
+      this._render(cycle > this._cycle ? 0 : one, true);
+    }
+    this._cycle = cycle;
+    this._render(local, quiet);
+  };
+  Timeline.prototype.Play = function() {
+    if (this.PlaybackState === PlaybackState.Playing) return;
+    if (this.PlaybackState === PlaybackState.Completed || this.Time >= this._totalTime()) this.Seek(0);
+    this.PlaybackState = PlaybackState.Playing;
+    this._lastNow = performance.now();
+    this._frameRequest = requestAnimationFrame(this._tick);
+  };
+  Timeline.prototype._tick = function(now) {
+    if (this.PlaybackState !== PlaybackState.Playing) return;
+    var seconds2 = Math.max(0, (now - this._lastNow) / 1e3) * this.Speed;
+    this._lastNow = now;
+    var total = this._totalTime();
+    this.Time = Math.min(total, this.Time + seconds2);
+    this._renderTotal(this.Time);
+    if (this.Time >= total) return this._finish();
+    this._frameRequest = requestAnimationFrame(this._tick);
+  };
+  Timeline.prototype._finish = function() {
+    this.PlaybackState = PlaybackState.Completed;
+    this._letGo();
+    this.Completed._fire(PlaybackState.Completed);
+  };
+  Timeline.prototype._letGo = function() {
+    this._items.forEach(function(item) {
+      if (item.kind !== "function") item.thing._letGo();
+    });
+  };
+  Timeline.prototype.Pause = function() {
+    if (this.PlaybackState !== PlaybackState.Playing) return;
+    this.PlaybackState = PlaybackState.Paused;
+    cancelAnimationFrame(this._frameRequest);
+  };
+  Timeline.prototype.Seek = function(seconds2) {
+    var total = this._totalTime();
+    this.Time = Math.max(0, Math.min(Number(seconds2) || 0, total === Infinity ? Number(seconds2) || 0 : total));
+    this._renderTotal(this.Time);
+    if (this.PlaybackState === PlaybackState.Completed && this.Time < total) this.PlaybackState = PlaybackState.Paused;
+  };
+  Timeline.prototype.Restart = function() {
+    this.Pause();
+    this.Seek(0);
+    this.PlaybackState = PlaybackState.Paused;
+    this.Play();
+  };
+  Timeline.prototype.DisplayTimeline = function(ui) {
+    if (ui) showTimelinePanel(this);
+    else logTimeline(this);
+  };
+  Timeline.prototype.Destroy = function() {
+    this.Pause();
+    this._letGo();
+    if (this._panel) this._panel.close();
+  };
+  function safeCall(fn, direction) {
+    try {
+      fn(direction);
+    } catch (err) {
+      console.error("WebTween: a function in a timeline had an error:", err);
+    }
+  }
+  Timeline.prototype.schedule = Timeline.prototype.Schedule;
+  Timeline.prototype.play = Timeline.prototype.Play;
+  Timeline.prototype.pause = Timeline.prototype.Pause;
+  Timeline.prototype.seek = Timeline.prototype.Seek;
+  Timeline.prototype.restart = Timeline.prototype.Restart;
+  Timeline.prototype.displayTimeline = Timeline.prototype.DisplayTimeline;
+  Timeline.prototype.destroy = Timeline.prototype.Destroy;
+  Timeline["new"] = function(settings) {
+    return new Timeline(settings);
+  };
+
+  // src/public/animation/Color3.js
+  var Color3 = {
+    fromRGB: function(r, g, b) {
+      return "rgb(" + r + ", " + g + ", " + b + ")";
+    },
+    new: function(r, g, b) {
+      return "rgb(" + r * 255 + ", " + g * 255 + ", " + b * 255 + ")";
+    },
+    fromHex: function(hex) {
+      return hex.charAt(0) === "#" ? hex : "#" + hex;
+    }
+  };
 
   // src/public/animation/ScrollableFrame.js
   function ScrollableFrame(src, keyframeEvents, keyframeTriggers, options) {
@@ -789,14 +1190,14 @@
         return t.frame > from && t.frame <= to;
       });
       passed.forEach(function(t) {
-        safeCall(t.fn, "Forward");
+        safeCall2(t.fn, "Forward");
       });
     } else {
       passed = this._triggers.filter(function(t) {
         return t.frame <= from && t.frame > to;
       });
       passed.reverse().forEach(function(t) {
-        safeCall(t.fn, "Backward");
+        safeCall2(t.fn, "Backward");
       });
     }
   };
@@ -806,7 +1207,7 @@
     if (stuck) this._backdrop.appendChild(this.Video);
     else this.Stage.insertBefore(this.Video, this.Stage.firstChild);
   };
-  function safeCall(fn, direction) {
+  function safeCall2(fn, direction) {
     try {
       fn(direction);
     } catch (err) {
@@ -1255,6 +1656,7 @@
     Enum,
     Color3,
     Tween,
+    Timeline,
     ScrollableFrame,
     Reveal,
     Parallax,
@@ -1271,6 +1673,7 @@
     "TweenInfo",
     "Enum",
     "Color3",
+    "Timeline",
     "ScrollableFrame",
     "Reveal",
     "Parallax",

@@ -230,25 +230,67 @@ Tween.prototype._applyEnd = function (backAtStart) {
   if (moved) writeMove(el, m.move);
 };
 
-Tween.prototype._step = function (now) {
+// How long the whole thing takes, delays and repeats included (Infinity if it repeats forever).
+Tween.prototype._totalTime = function () {
   var info = this.TweenInfo;
-  var elapsed = (this._elapsed = Math.max(0, now - this._startTime) / 1000);
+  if (info.RepeatCount < 0) return Infinity;
+  return (info.DelayTime + info.Time * (info.Reverses ? 2 : 1)) * (info.RepeatCount + 1);
+};
+
+// Where the animation is, `elapsed` seconds after it starts. null = it's finished.
+Tween.prototype._progressAt = function (elapsed) {
+  var info = this.TweenInfo;
   var oneCycle = info.DelayTime + info.Time * (info.Reverses ? 2 : 1);
   var cycles = info.RepeatCount < 0 ? Infinity : info.RepeatCount + 1;
   var cycle = oneCycle > 0 ? Math.floor(elapsed / oneCycle) : Infinity;
-
-  if (cycle >= cycles) return this._finish();
+  if (cycle >= cycles) return null;
 
   var inCycle = elapsed - cycle * oneCycle;
-  if (inCycle < info.DelayTime) {
-    this.PlaybackState = PlaybackState.Delayed;
-    if (cycle > 0) this._apply(0);
-    return;
-  }
-  this.PlaybackState = PlaybackState.Playing;
+  if (inCycle < info.DelayTime) return { state: PlaybackState.Delayed, alpha: 0, repeating: cycle > 0 };
   var progress = info.Time > 0 ? (inCycle - info.DelayTime) / info.Time : 1;
   if (info.Reverses && progress > 1) progress = 2 - progress;
-  this._apply(ease(progress, info.EasingStyle, info.EasingDirection));
+  return { state: PlaybackState.Playing, alpha: ease(progress, info.EasingStyle, info.EasingDirection) };
+};
+
+Tween.prototype._step = function (now) {
+  var elapsed = (this._elapsed = Math.max(0, now - this._startTime) / 1000);
+  var at = this._progressAt(elapsed);
+  if (!at) return this._finish();
+  this.PlaybackState = at.state;
+  if (at.state === PlaybackState.Delayed) {
+    if (at.repeating) this._apply(0);
+    return;
+  }
+  this._apply(at.alpha);
+};
+
+// For Timelines: show the animation as it is `t` seconds after it starts. t can be anything,
+// before the start (negative) or after the end, so a timeline can jump back and forth.
+Tween.prototype._renderAt = function (t) {
+  if (!this._captured) {
+    if (t < 0) return; // hasn't started yet, and never has: leave things alone
+    this._capture(); // start from wherever things are the first time it's reached
+    this._captured = true;
+  }
+  if (!this._held) {
+    this._hold();
+    this._held = true;
+  }
+  var at = t < 0 ? { state: PlaybackState.Begin, alpha: 0 } : this._progressAt(t);
+  if (!at) {
+    this._applyEnd(this.TweenInfo.Reverses);
+    this.PlaybackState = PlaybackState.Completed;
+    return;
+  }
+  this.PlaybackState = at.state;
+  this._apply(at.alpha);
+};
+
+// For Timelines: give CSS transitions back once the timeline is done with this tween.
+Tween.prototype._letGo = function () {
+  if (!this._held) return;
+  this._held = false;
+  this._release();
 };
 
 Tween.prototype._finish = function () {
