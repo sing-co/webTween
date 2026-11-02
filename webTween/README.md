@@ -211,7 +211,10 @@ With `StickToLastFrame`, the frame sits *behind* the rest of the page. Sections 
 - `frame.SkipButton` — the skip button itself. It sits at the bottom middle of the video and fades away once there's nothing left to skip. Style `.webtween-skip` in your own CSS to change its looks or where it sits.
 - `frame.Destroy()` — removes it from the page.
 
-**If the video still looks choppy when you scroll:** that's the video file, not the code. Normal videos only store a full picture every few seconds, so jumping around is slow. Re-save it with a full picture on every frame using [ffmpeg](https://ffmpeg.org):
+**If the video looks choppy or stuck when you scroll**, check these two things, in this order:
+
+1. **How the page is served.** To jump around inside a video, the browser asks the server for one piece of the file at a time ("range requests"). Some simple servers, like `python -m http.server`, don't support that, and the video stalls or snaps back. Use VS Code's **Live Server**, `npx http-server` or `npx serve` instead. Real hosting (GitHub Pages, Netlify, Vercel) is fine.
+2. **The video file.** Normal videos only store a full picture every few seconds, so jumping around is slow. Re-save it with a full picture on every frame using [ffmpeg](https://ffmpeg.org):
 
 ```bash
 ffmpeg -i input.mp4 -an -c:v libx264 -g 1 -crf 23 -movflags faststart output.mp4
@@ -366,3 +369,4 @@ npm run watch
 - `X`, `Y`, `Rotation` and `Scale` take over the element's CSS `transform`. If your stylesheet also sets `transform` on the same element, WebTween's will win.
 - CSS `transition`s on an element are paused while a tween is running on it, so they don't fight.
 - `Completed.Wait()` needs `await` in front of it.
+- Going between two different units doesn't animate. If something is at `X: "-100%"`, tween it to `X: "0%"`, not `X: 0` (a plain number means pixels, and a change of unit starts from 0 in the new unit, so there's nothing to animate).

@@ -3,9 +3,19 @@
 Smooth animations for websites that work like Roblox's **TweenService**.
 If you've made a tween in Roblox, you already know how to use this.
 
+**What's in it**
+
+- **Tweens:** `TweenService`, `TweenInfo`, `Color3` and `Enum`, working like Roblox's
+- **Timeline:** line up tweens and functions, then play, pause, scrub through or slow them down, with a panel to see it all
+- **ScrollableFrame:** a video that plays as you scroll, with events at the frames you choose and a "skip" button
+- **Reveal, Parallax and Slideshow:** things fade in as you scroll to them, drift as the page moves, or crossfade, in one line each
+- **Card, ImageCard and Carousel:** ready-made pieces, including a 3D spinning ring
+
+**Try it:** open [`webTween/timeline-demo.html`](webTween/timeline-demo.html) with a local server (see [If the video looks choppy](#scrollableframe--a-video-that-plays-as-you-scroll) for which ones work), press Play, and drag across the panel at the bottom.
+
 ## Getting started
 
-Put `webtween.js` next to your HTML file and add one line:
+Download [`webTween/webtween.js`](webTween/webtween.js), put it next to your HTML file and add one line:
 
 ```html
 <script src="webtween.js"></script>
@@ -110,6 +120,57 @@ async function sequence() {
 `Connect` gives you back a connection — call `.Disconnect()` on it to stop listening.
 `Once(...)` listens for just the next time.
 
+## Timeline — line lots of things up
+
+For more than two or three steps, a Timeline is easier than waiting for each tween. Make the tweens (don't `Play()` them), then schedule them:
+
+```js
+const intro = new Timeline({ Name: "Intro" })      // Timeline.new(...) works too
+
+intro.Schedule(titleIn)                    // starts at 0
+intro.Schedule(photoIn, "+0.2")            // 0.2s after the previous one ends
+intro.Schedule(buttonPop, "with")          // at the same time as the previous one
+intro.Schedule(sayHi, 2.5)                 // a function, run exactly 2.5s in
+intro.Schedule(otherTimeline)              // timelines can go inside timelines
+
+intro.Play()
+```
+
+**What you can schedule:** a tween from `TweenService.Create(...)`, a function, or another Timeline.
+
+**When it starts** (the second thing you give `Schedule`, optional):
+
+| You write | It starts |
+|---|---|
+| nothing | right after the previous thing ends |
+| `1.5` | exactly 1.5 seconds from the start |
+| `"+0.2"` | 0.2 seconds after the previous thing ends |
+| `"-0.2"` | 0.2 seconds *before* the previous thing ends, so they overlap |
+| `"with"` | at the same moment as the previous thing |
+
+The third thing is an optional name, shown by `DisplayTimeline`: `intro.Schedule(titleIn, 0, "Title in")`. Things you don't name get one made up, like `#title: Y, opacity`.
+
+Functions are told `"Forward"` or `"Backward"` (like ScrollableFrame's keyframe events), because a timeline can be scrubbed or jumped back past them.
+
+**Settings** (all optional): `new Timeline({ Name, RepeatCount, Reverses, Speed })`. `RepeatCount` and `Reverses` work like TweenInfo's. `Speed` is `1` for normal, `0.5` for half speed, and can be changed while it plays.
+
+| Do this | What happens |
+|---|---|
+| `intro.Play()` | Plays from where it is (from the start if it's finished) |
+| `intro.Pause()` | Freezes it |
+| `intro.Restart()` | Back to the start, and plays |
+| `intro.Seek(1.5)` | Jumps to 1.5 seconds in, playing or not |
+| `intro.Duration` | How long one play takes, in seconds |
+| `intro.Completed.Connect(fn)` | Runs when it finishes |
+| `intro.GetSchedule()` | A list of everything, with `Name`, `Kind`, `Starts`, `Ends` and `Length` |
+
+### Seeing your timeline
+
+- `intro.DisplayTimeline(false)` prints a table in the browser's console: every scheduled thing, when it starts and ends.
+- `intro.DisplayTimeline(true)` opens a panel along the bottom of the page: a bar for each thing, play and pause, slow motion, and a red playhead. **Drag across the bars to scrub through your real page**, frame by frame. Hover a bar for its exact times. It doesn't change your code: when you've found the right timing, change the numbers in your `Schedule` calls.
+
+Each tween starts from wherever things are the moment the timeline reaches it, so two tweens in a row on the same thing carry on from each other. A tween in a timeline belongs to that timeline: don't also `Play()` it on its own.
+
 ## Extra tools
 
 - `TweenService.GetValue(0.5, "Quad", "Out")` — the eased value at a point (0 to 1), without animating anything.
@@ -143,10 +204,9 @@ function flyInLogo(direction) {
 | `ScrollLength` | How many screens of scrolling it takes to get through the whole video | `3` |
 | `Smoothness` | How quickly the video catches up to the scroll. `1` = instantly, `0.05` = very floaty | `0.15` |
 | `StickToLastFrame` | `true` keeps the last frame as the page's background once you scroll past the video. Scroll back up and it plays again. | `false` |
-
+| `SkipButton` | `false` hides the "Skip the animation" button | `true` |
+| `SkipText` | What the skip button says | `"Skip the animation"` |
 | `StuckFrame` | `true` makes the video the background of the **whole page**. It fills the window the entire time, your page scrolls over it, and scrolling from the top of the page to the bottom plays it start to finish. `ScrollLength` and `StickToLastFrame` don't do anything here; your page's own content decides how long the scroll is. | `false` |
-
-See `scroll-demo.html` for a working example.
 
 With `StickToLastFrame`, the frame sits *behind* the rest of the page. Sections after it with no background of their own show it through. Sections with a background cover it. Things you put in `frame.Stage` don't come along, only the video does.
 
@@ -155,9 +215,14 @@ With `StickToLastFrame`, the frame sits *behind* the rest of the page. Sections 
 - `frame.Stage` — the box the video sits in. Put your own things in it (`frame.Stage.append(myLogo)`) and they stay on top of the video while it plays.
 - `frame.Frame` — the frame showing right now. `frame.Progress` — how far through, from 0 to 1.
 - `frame.FrameChanged.Connect(function (n) { ... })` — runs every time the frame changes.
+- `frame.Skip()` — jumps to the end, like pressing the skip button. Every keyframe event on the way still runs (`"Forward"`), and the page scrolls to just after the video. With `StuckFrame` it stays on the last frame until the page is scrolled back to the top.
+- `frame.SkipButton` — the skip button itself. It sits at the bottom middle of the video and fades away once there's nothing left to skip. Style `.webtween-skip` in your own CSS to change its looks or where it sits.
 - `frame.Destroy()` — removes it from the page.
 
-**If the video looks choppy when you scroll:** that's the video file, not the code. Normal videos only store a full picture every few seconds, so jumping around is slow. Re-save it with a full picture on every frame using [ffmpeg](https://ffmpeg.org):
+**If the video looks choppy or stuck when you scroll**, check these two things, in this order:
+
+1. **How the page is served.** To jump around inside a video, the browser asks the server for one piece of the file at a time ("range requests"). Some simple servers, like `python -m http.server`, don't support that, and the video stalls or snaps back. Use VS Code's **Live Server**, `npx http-server` or `npx serve` instead. Real hosting (GitHub Pages, Netlify, Vercel) is fine.
+2. **The video file.** Normal videos only store a full picture every few seconds, so jumping around is slow. Re-save it with a full picture on every frame using [ffmpeg](https://ffmpeg.org):
 
 ```bash
 ffmpeg -i input.mp4 -an -c:v libx264 -g 1 -crf 23 -movflags faststart output.mp4
@@ -165,6 +230,52 @@ ffmpeg -i input.mp4 -an -c:v libx264 -g 1 -crf 23 -movflags faststart output.mp4
 
 The file gets bigger, but scrolling becomes buttery. (`-an` removes the sound, which isn't used anyway.) For long videos, try `-g 5` instead of `-g 1` for a smaller file.
 
+## Reveal — things fade and rise in as you scroll to them
+
+```js
+new Reveal(".fade-in")
+```
+
+Everything that matches starts invisible and a little lower down. When it scrolls onto the screen, it fades in and rises into place. Things that come into view together go one after another.
+
+| Setting | What it means | Default |
+|---|---|---|
+| `Distance` | How far below its spot it starts, in pixels | `28` |
+| `Time` | How long the fade and rise take, in seconds | `0.9` |
+| `EasingStyle` | How it feels (always `"Out"`, so it slows down as it lands) | `"Quint"` |
+| `Stagger` | Seconds between things that appear at the same time | `0.08` |
+| `Threshold` | How much of it must be on screen before it comes in. `0.5` = half | `0.15` |
+
+**Useful parts:** `reveal.ShowAll()` brings everything in now. `reveal.Elements` is the list it's looking after.
+
+## Parallax — things drift as you scroll
+
+```js
+new Parallax(".photo", { Speed: 0.1 })
+new Parallax(".photo", { Speed: [0.05, 0.12, 0.08] })   // a different speed for each one
+```
+
+`Speed` is how much each thing drifts as the page scrolls: `0.1` moves it a tenth as far as the page, so it seems to float. Negative speeds drift the other way. Everything is exactly in its normal spot when it's in the middle of the screen. `parallax.Destroy()` puts everything back.
+
+## Slideshow — pictures that fade from one to the next
+
+```js
+new Slideshow(["pool.jpg", "lobby.jpg", "room.jpg"], { AspectRatio: "16:9", Parent: "#about" })
+```
+
+The slides can be picture paths (each becomes an ImageCard in the `AspectRatio` you give), ImageCards, or any page elements. They're stacked in one spot, and the first slide decides how big it is.
+
+| Setting | What it means | Default |
+|---|---|---|
+| `Every` | Seconds each slide stays before the next fades in | `6` |
+| `FadeTime` | How long a fade takes, in seconds | `1.6` |
+| `EasingStyle` | How a fade feels | `"Sine"` |
+| `AspectRatio` | The shape, when the slides are picture paths | `1` |
+| `Parent` | Where on the page to put it | not on the page |
+
+**Useful parts:** `slideshow.Next()`, `slideshow.Show(2)` (the first slide is `0`), `slideshow.Current`, `slideshow.Slides`, `slideshow.Destroy()`. It waits while the tab isn't being looked at.
+
+**Reveal, Parallax and Slideshow all move things with the element's CSS `transform` or opacity, like tweens do.** So don't use two of them (or a tween on X, Y, Rotation or Scale) on the same element: put one inside the other. If someone's device asks for less motion, Reveal and Parallax don't move anything and Slideshow stays on its first slide.
 
 ## Card and Carousel — ready-made pieces
 
@@ -183,6 +294,22 @@ You can skip `new Card` and just give the settings: `new Carousel([{ Title: "Cat
 **Card settings** (all optional): `Title`, `Image`, `Description`, `Color`, `TextColor`, `Parent`.
 A card only goes on the page when you give it to a Carousel, or give it a `Parent`.
 
+### ImageCard — just a picture, in the shape you want
+
+```js
+new ImageCard({ Image: "pool.jpg", AspectRatio: "16:9", Title: "The pool", Parent: "#gallery" })
+```
+
+| Setting | What it means | Default |
+|---|---|---|
+| `Image` | The picture | none |
+| `AspectRatio` | Width compared to height. `1` = square, `"16:9"` = wide, `"3:4"` = tall. `"16/9"` or a number like `1.5` work too | `1` |
+| `Width` | How wide it is. The height follows from `AspectRatio` | `240` |
+| `Title` | A caption over the bottom of the picture (also used as its alt text) | none |
+| `Parent` | Where on the page to put it | not on the page |
+
+The picture is cropped to fit the shape, so it never looks stretched. ImageCards can go in a Carousel too, mixed with normal Cards if you like.
+
 **Carousel settings** (all optional)
 
 | Setting | What it means | Default |
@@ -199,25 +326,29 @@ You can change any of them later and it takes effect straight away: `carousel.Du
 
 **Useful parts:** `carousel.Next()`, `carousel.Previous()`, `carousel.Cards`, `carousel.Destroy()`.
 
-**Changing the looks:** style `.webtween-carousel` (the ring) and `.webtween-card` (each card, plus `img`, `h2` and `p` inside it) in your own CSS. Yours wins over WebTween's.
+**Changing the looks:** style `.webtween-carousel` (the ring) and `.webtween-card` (each card, plus `img`, `h2` and `p` inside it) and `.webtween-imagecard` (plus `img` and the caption `span`) in your own CSS. Yours wins over WebTween's.
 
 ## How the files are laid out
 
-`webtween.js` is the only file your pages need. It's made from the files in `src/`:
+`webTween/webtween.js` is the only file your pages need. It's made from the files in `webTween/src/`:
 
 ```
 src/
   index.js             the starting point: lists what your page gets
   hidden/              the stuff no one needs to see (easing maths, reading styles, the clock...)
   public/
-    animation/         TweenService, TweenInfo, Tween, Enum, Color3, ScrollableFrame
-    elements/          Card: single building blocks
-    buildReferences/   Carousel: things built out of elements + animation
+    animation/         TweenService, TweenInfo, Tween, Timeline, Enum, Color3, ScrollableFrame, Reveal, Parallax
+    elements/          Card, ImageCard: single building blocks
+    buildReferences/   Carousel, Slideshow: things built out of elements + animation
 ```
 
 Each file says at the top what it uses from other files (`import`), and at the bottom what it lets other files use (`export`). Anything a file doesn't export stays private to that file.
 
-**Don't edit `webtween.js` directly.** Change the files in `src/`, then rebuild. The first time, install the build tool (needs [Node.js](https://nodejs.org)):
+**Don't edit `webtween.js` directly.** Change the files in `webTween/src/`, then rebuild. The first time, go into the folder and install the build tool (needs [Node.js](https://nodejs.org)):
+
+```bash
+cd webTween
+```
 
 ```bash
 npm install
@@ -250,3 +381,4 @@ npm run watch
 - `X`, `Y`, `Rotation` and `Scale` take over the element's CSS `transform`. If your stylesheet also sets `transform` on the same element, WebTween's will win.
 - CSS `transition`s on an element are paused while a tween is running on it, so they don't fight.
 - `Completed.Wait()` needs `await` in front of it.
+- Going between two different units doesn't animate. If something is at `X: "-100%"`, tween it to `X: "0%"`, not `X: 0` (a plain number means pixels, and a change of unit starts from 0 in the new unit, so there's nothing to animate).
